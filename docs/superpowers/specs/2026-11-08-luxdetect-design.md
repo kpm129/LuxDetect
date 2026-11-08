@@ -2,7 +2,7 @@
 
 Date: 8 November 2026
 
-Status: proposed design; awaiting user approval before writing-plans
+Status: conditionally approved; awaiting confirmation of the builder-defaults table before writing-plans
 
 Primary device: iPhone 17, latest iOS Safari
 
@@ -24,7 +24,9 @@ Safari generally supplies no usable exposure time, ISO, or exposure lock.
 The primary measurement therefore learns an empirical relationship between
 camera brightness and independently measured lux. Automatic exposure may make
 that relationship impossible to learn. Honest failure is a successful product
-outcome; no accuracy percentage is promised.
+outcome; no accuracy percentage is promised. On iPhone Safari, start in
+**Relative brightness (uncalibrated)** unless a compatible valid calibration
+has been loaded for the selected mode. Without one, never display lux.
 
 ## Goals, boundaries, and constraints
 
@@ -110,7 +112,7 @@ Reading states, in priority order:
 | Stopped, starting, denied, interrupted, stale frame | No number; explain state | Start/retry as appropriate |
 | More than 25% clipped pixels | **Too bright – no reading** | No lux, index, or light-level label; block sample saving |
 | Too dark or too few usable pixels | No number; explain image is too dark/unusable | Block sample saving |
-| Valid image, no valid calibration for this mode/method/setup | Index 0–100; **Relative brightness (uncalibrated)** | No light-level label or lux unit |
+| Valid image, no valid calibration for this mode/setup | Index 0–100; **Relative brightness (uncalibrated)** | No light-level label or lux unit |
 | Valid calibration; estimate outside calibrated range | Large approximate value, e.g. **~75,000 lx**; **Outside calibrated range** | Explain extrapolation; hide light-level label |
 | Valid calibration; estimate inside range | **Estimated lux (calibrated)**; value and lx | Show light-level label and quality/date |
 
@@ -162,7 +164,7 @@ Reject the whole capture, adding no sample, when any of these applies:
 - A frame is saturated (>25% clipped), too dark, or otherwise unusable.
 - `(maximum brightness − minimum brightness) / mean brightness > 0.10`.
   Show exactly **Light changed while sampling. Try again.** Exactly 10% passes.
-- The camera stops, is backgrounded, switches modes/method/setup, or becomes
+- The camera stops, is backgrounded, switches modes/setup, or becomes
   stale during capture.
 - There are fewer than ten distinct processed frames over at least 1.8 seconds
   of the two-second wall-clock window, or any inter-frame gap exceeds 400 ms.
@@ -188,22 +190,23 @@ names are suggestions, not guaranteed numerical lux levels.
 
 ### Check calibration and quality
 
-Check calibration runs the pure validator against the current mode/method's
+Check calibration runs the pure validator against the current mode's
 draft. It must reject:
 
 1. Fewer than four usable samples; invalid/nonpositive/nonfinite values; mixed
-   modes, incompatible processing versions, camera setup, or estimator method.
+   modes, incompatible processing versions, camera setup, or model type.
 2. Reference span `maximum lux / minimum lux < 10`.
 3. Brightnesses too similar: normalized span `(max−min)/mean ≤ 0.10`, or fewer
-   than four distinct brightness groups (group values less than 1% apart).
+   than four distinct brightness groups (sort by brightness and start a new
+   group only at ≥1.01× the current group anchor; the first value anchors each
+   group).
    Endpoints must also differ by more than three times their combined within-
-   sample standard deviation. These are conservative builder defaults, not
-   a claim of physical measurement accuracy.
+   sample standard deviation, combined as `sqrt(sd_min² + sd_max²)`. These are
+   conservative builder defaults, not a claim of physical measurement accuracy.
 4. Any saturated, too-dark, or unstable sample. Imported records need sufficient
    capture statistics to apply the same checks.
-5. Undefined/degenerate regression, nonfinite parameters, `a ≤ 0`, `b ≤ 0`
-   for the power model (or `C ≤ 0` for the optional exposure model), or R²
-   below 0.8. R² denominator zero is a failure, not a perfect fit.
+5. Undefined/degenerate regression, nonfinite parameters, `a ≤ 0`, `b ≤ 0`,
+   or R² below 0.8. R² denominator zero is a failure, not a perfect fit.
 6. Inconsistent direction: after ordering samples by reference lux, a higher
    reference produces a lower mean brightness by more than 1% (builder noise
    tolerance). A positive fitted slope alone must not hide such a reversal.
@@ -262,13 +265,13 @@ Builder defaults, all versioned editable constants:
   camera-image brightness, not physical light intensity.
 - Smooth the live display with the last one second of usable brightness samples;
   sample capture/stability and guardrails use unsmoothed data. Clear windows on
-  stop, mode/method change, interruption, or invalid-image recovery.
+  stop, mode change, interruption, or invalid-image recovery.
 
 Because Safari also applies tone mapping and other processing, even linearized
 sRGB is not guaranteed to be linear sensor irradiance. Keep this limitation in
 the guide/calibration help and do not imply that fitting removes it.
 
-### Model boundary and optional exposure path
+### Model boundary and exposure diagnostics only
 
 Pure `calibration.js` accepts samples and configuration, returns either a
 versioned model plus quality/range metadata or structured failure reasons.
@@ -277,38 +280,21 @@ implements the formula. Its interface dispatches by model type; a future
 `piecewise-v1` model can share it with `power-v1`. Store both min/max reference
 lux and min/max training brightness. In range requires both brightness and
 predicted lux to lie within their stored bounds, inclusive, allowing only
-floating-point rounding tolerance.
+a relative rounding tolerance of `1e-9 × max(1, abs(bound))` at each bound.
 
-Pure `lux.js` also contains the README exposure formula:
+Exposure metadata is **debug-only in v1**. Detect and display capability support
+and actual availability of exposure time, ISO, aperture and exposure lock when
+the browser supplies them. Distinguish unsupported, unavailable and available
+values, including browser-reported units. Do not infer unavailable values or
+suggest that capability support establishes frame-aligned measurements.
 
-`EV100 = log2(N² / t) + log2(100 / ISO)`
-
-`lux = C × 2^EV100 × (linear luminance / 0.18)`
-
-Do not infer ISO from an arbitrary gain, guess aperture, or treat capability
-support as current settings. Normalize verified exposure units to seconds,
-ISO to photographic ISO, and aperture to f-number. Exposure lock is informational
-only and not required for this path; no manual exposure controls in v1.
-
-Proposed builder decision to reconcile the optional Android path with the
-no-uncalibrated-lux rule: activate the exposure formula only with complete,
-verified frame-corresponding metadata and a valid calibration for that method.
-Use the same reference capture UI; store exposure metadata with each frame/
-sample. Calibrate C as the geometric mean of `reference lux / exposure predictor`,
-where the predictor is the formula with C=1; calculate log-space R² against
-that fixed-exponent model and apply the same sample/span/stability/outlier/
-quality safeguards to its predictor. This produces `exposure-v1`, stored
-separately from `power-v1` within each physical mode. Never label a formula
-using guessed inputs or the README's initial C≈2.5 as calibrated.
-
-Safari always uses the primary power curve. Prefer the exposure path on capable
-browsers once its calibration is valid. If complete metadata is absent or a
-verified frame-aligned adapter is unavailable, remain on the brightness path;
-report why in capabilities. A browser reporting exposure support alone does
-not establish reliable per-frame synchronization. Switching paths clears live
-windows and only uses that path's compatible calibration; it never applies a
-brightness calibration to an exposure predictor. Android hardware verification
-is optional for the first iPhone release, and unverified adapters stay disabled.
+There is **no exposure-based lux formula, exposure calibration, correction
+constant, metadata adapter, or reconciliation path in v1**, including Android.
+Every v1 lux estimate uses the same calibrated `power-v1` brightness model.
+The README's exposure formula describes a possible future direction and is
+superseded by this narrower design for v1. `lux.js` owns only light-level
+classification and reading/range presentation decisions in v1. A future model
+type may be added behind the model boundary; unknown model types are rejected.
 
 ## Auto-exposure warning
 
@@ -349,12 +335,12 @@ All heuristic thresholds are tunable constants and need real-device evaluation.
 
 Use one versioned localStorage document, `luxdetect:v1`, containing preferences
 (theme, last mode, guide seen), and a record per physical mode. Each mode has
-draft samples and active calibrations keyed by estimator method. Keep the
-validated active sample snapshot separate from the draft. Persist on accepted
+one draft sample collection and one active `power-v1` calibration snapshot.
+Keep the validated active sample snapshot separate from the draft. Persist on accepted
 sample, delete/undo, successful fit/import, mode/theme change, and guide finish.
 Timestamp records in UTC ISO format; show dates in the device's locale/timezone.
 
-Include schema/processing/model versions, physical mode, method, a/b or C,
+Include schema/processing/model versions, physical mode, model type, a/b,
 log-space R², quality, reference-lux range, predictor range, sample count,
 created/updated/calibrated timestamps, reference provenance per sample, notes,
 sample stability and clipping/darkness statistics, and available camera setup
@@ -380,12 +366,18 @@ Exclude images, video, transient debug history, and raw camera device IDs from
 portable exports. Preserve per-sample reference source and all data needed to
 revalidate a fit. State that files may reveal measurement dates/notes.
 
-Import is a deliberate file selection, limited to 1 MB and 200 samples per
-mode/method (builder limits). Validate schema/version, enum values, finite
-numbers, sample quality, positivity, counts and compatibility. Refit from raw
-samples; never trust imported a/b/C, R², badge or range. Unsupported future
-models are rejected safely. Show a preview naming modes, dates, provenance,
-quality and ranges; explicitly confirm using the same phone/lens/diffuser and
+Enforce the 200-sample limit for each draft and active snapshot when saving
+new captures as well as on import; offer deletion/export when a draft is full.
+
+Import is a deliberate file selection, limited to 1 MiB and 200 samples per
+mode per collection (draft or active snapshot; builder limits).
+Use 1 MiB = 1,048,576 bytes as the exact file-size limit. Validate schema/version,
+enum values, finite numbers, sample quality, positivity, counts and compatibility. Refit from raw
+samples; never trust imported a/b, R², badge or range. Accept only the exact
+supported schema, processing and `power-v1` model versions; reject unknown or
+incompatible versions. **No schema migration, conversion, or compatibility
+adapters in v1**, for either import or saved localStorage. Show a preview naming
+modes, dates, provenance, quality and ranges; explicitly confirm using the same phone/lens/diffuser and
 **Import and replace these modes** before replacing compatible records. Import
 is a user operation in the future app, not approval needed for this design.
 Validate the entire import before changing anything. Invalid/incompatible
@@ -402,13 +394,14 @@ user confirmation and a physical reference check remain necessary.
 ## Debug panel
 
 A collapsed-by-default disclosure contains raw unsmoothed linear brightness,
-clipped %, near-black %, usable %, a/b (or C for exposure method), log-space R²,
-sample count/list with sources, range, active mode/method, relevant capability
+clipped %, near-black %, usable %, a/b, log-space R²,
+sample count/list with sources, range, active mode/model type, relevant capability
 support and actual metadata availability. Show measured video FPS, processed
 FPS, decoded resolution, and measurement crop size in pixels. Show **Unavailable**
 when an observed value cannot be measured; do not present requested FPS as actual.
 
-A ten-second brightness sparkline uses a bounded timestamped buffer and labels
+A ten-second brightness sparkline uses a bounded timestamped buffer of up to
+100 processed observations (target ten per second) and labels
 its units/time axis. Invalid periods appear as gaps, never interpolated valid
 readings. Reset on mode change/stop. **Copy debug info** copies a plain-text/
 JSON diagnostic summary including the numerical ten-second history and sample
@@ -422,10 +415,10 @@ Proposed modules, responsibilities only (no implementation in this document):
 
 - `camera.js`: permission, lifecycle, capabilities, decoded-frame timestamps.
 - `luminance.js`: pure pixel linearization, crop statistics, clipping/dark checks.
-- `lux.js`: pure exposure math and light-level classification.
+- `lux.js`: pure light-level classification and reading/range decisions; no exposure formula.
 - `calibration.js`: pure capture validation, fit/quality checks and prediction
   dispatch; no DOM, camera, localStorage or clock reads.
-- `storage.js`: schema, migration/rejection, local persistence, import/export.
+- `storage.js`: strict version validation/rejection, local persistence, import/export; no migration.
 - `ui.js` and a small entry module: screen/state coordination and rendering.
 - `config.js`: versioned thresholds and limits; unit tests import these values.
 
@@ -449,9 +442,10 @@ degenerate regression; nonpositive values; negative slopes; monotonic reversals;
 a single severe outlier; rough-reference caps; finite outputs and range edges;
 sRGB conversion; clipped/near-black exclusion; >5% and >25% boundaries;
 too-dark/unusable images; exactly/above 10% stability; incomplete capture windows;
-label boundaries at 50/5,000/15,000/50,000; and exposure units/formula/invalid data.
+and label boundaries at 50/5,000/15,000/50,000. Exposure metadata availability
+is diagnostic only and does not enable a second estimator.
 
-Test persistence and import with fixtures: independent modes/methods, reload,
+Test persistence and import with fixtures: independent modes, reload,
 failed fit retaining a previous model, delete/undo, corrupted/quota-limited
 storage, missing/invalid sources, invalid/oversized/incompatible JSON, recompute
 instead of trusting coefficients, partial-mode replacement, and cancelled import.
@@ -459,12 +453,15 @@ Test auto-exposure heuristics with timestamped fixtures: unchanged scenes do
 not warn; changed descriptors with constant brightness can warn; dark/clipped
 images do not feed the detector. No synthetic test establishes physical accuracy.
 
-Browser smoke checks use synthetic/injected camera frames where practical to
+Optional browser smoke checks may use synthetic/injected camera frames to
 verify labels and state transitions, permission denial, Stop releasing tracks,
 background cancellation, stale frames, mode switching, clipping suppression,
 source capture, failure recovery, Undo, import/export and copy fallback. Check
 mobile widths and both themes. Keep automated data sources out of real-device
-measurement mode.
+measurement mode. Injected-frame browser automation is nice-to-have and is
+**not required for Milestone 1**. Pure unit tests for the functionality delivered
+in each milestone remain mandatory. Actual iPhone Safari checks and the Netlify
+HTTPS smoke check are still necessary to claim Milestone 1 works.
 
 Build with Vite and deploy its static `dist` output to Netlify (build command
 `npm run build`; dependency lockfile committed during implementation). Verify
@@ -477,20 +474,99 @@ holdout reference readings, not just fitted samples. The first release may
 honestly show only relative brightness if Safari flattens the signal. Android
 Chrome hardware checks are optional and must be reported as unrun if unavailable.
 
-## Decisions made here for approval
+## Builder-chosen values awaiting confirmation
 
-The user explicitly supplied mode separation, storage/import, power fitting,
-latest R² bands, clipping/stability thresholds, light categories and debug
-requirements. Builder choices proposed here include exact pixel cutoffs,
-brightness separation/noise checks, outlier tolerance, crop and frame cadence,
-one-step Undo lifetime, import safety/limits, auto-exposure heuristics, and the
-calibrated exposure-path reconciliation. These are adjustable design decisions,
-not claims of user agreement or proven sensor performance.
+This is the single inventory of proposed builder defaults. These values are
+adjustable and are not proven sensor-performance guarantees. User-specified
+requirements (such as 10% sample stability, clipping percentages, quality bands,
+and lux category boundaries) are retained separately and are not presented as
+builder choices. Descriptive sample numbers in the mockups are not defaults.
+Scientific sRGB conversion coefficients are listed after this table; they are
+standard conversion constants, not fitted or tunable thresholds.
 
-Next gate: user reviews this design document. Wait for explicit approval before
-invoking `superpowers:writing-plans`. No implementation or deployment is
-authorized by approval of the earlier visual direction alone.
+| Area | Proposed value or rule | Meaning |
+| --- | --- | --- |
+| Clipped pixel cutoff | Any 8-bit R/G/B channel ≥250 of 255 | Exclude that pixel; count it in clipped %. |
+| Near-black pixel cutoff | All 8-bit R/G/B channels ≤5 of 255 | Exclude that pixel; count it in near-black %. |
+| Too-dark image | >90% near-black pixels | No reading or accepted sample. |
+| Minimum usable pixels | ≥50% of the measurement crop | Below this, no reading or accepted sample. |
+| Crop | Centered 25% of video width ×25% of height | 6.25% of total image area; 320×180 px at 1280×720. |
+| Requested resolution | Ideally 1280×720 px | Accept the actual rear-camera resolution supplied. |
+| Processing cadence | Target 10 distinct frames/s | Measure actual video and processing FPS separately. |
+| Live smoothing | Trailing 1.0 s of usable brightness | Sample validation uses unsmoothed values. |
+| Stale frame timeout | >1.0 s without a new frame | Remove the live number. |
+| Invalid-image recovery | 3 consecutive usable frames | Reset smoothing before resuming numbers. |
+| Relative index | 100×linear brightness; nearest whole number | 0–100 display, unrounded data retained internally. |
+| Capture completeness | ≥10 distinct frames across ≥1.8 s of the 2.0 s capture | Reject an incomplete capture. |
+| Maximum capture frame gap | ≤400 ms | Longer gaps reject the capture. |
+| Brightness separation | `(max−min)/mean` must be >10% | Fails if the calibration signals cluster. |
+| Distinct brightness groups | ≥4 groups; new group at ≥1.01× its sorted anchor | Avoid counting nearly identical samples as four useful levels. |
+| Separation above noise | Endpoint brightness difference >3×`sqrt(sd_min²+sd_max²)` | Compare spread with noise recorded in the endpoint captures. |
+| Reversal tolerance | At most 1% decrease from preceding brightness when reference lux increases | Larger reversals fail, even if the fitted slope is positive. |
+| Outlier tolerance | Absolute log10 residual ≤0.30 | More than roughly 2× error fails; identify the sample without deleting it. |
+| Range rounding tolerance | `1e-9×max(1,abs(bound))` at each bound | Only floating-point edge tolerance; not permission to extrapolate silently. |
+| Unverified Other source | Treat as rough; all-rough calibration capped at Fair | An Other label cannot upgrade rough data to Good. |
+| Undo depth | 1 deletion | Restore the last deleted sample in its original position. |
+| Undo lifetime | No countdown; until next deletion, leaving calibration editing, or successful fit promotion; 0 persistence across reloads | Active calibration remains separate from draft edits. |
+| Import size | ≤1,048,576 bytes (1 MiB) | Reject larger files before parsing. |
+| Sample collection limit | ≤200 samples per mode per collection | Applies to drafts and active snapshots, and to capture/import consistently. |
+| Version support | 1 supported schema version, processing version and model (`power-v1`) | Reject unknown versions; 0 migrations. |
+| Auto-exposure descriptor | 8×8 spatial/chromatic grid | Look for changes in appearance; mean brightness alone is insufficient. |
+| Scene-change threshold | Mean absolute normalized descriptor change >0.08 | Compared with the preceding 1.0 s baseline. |
+| Scene-change persistence | ≥0.5 s | Ignore briefer changes. |
+| Scene-change evidence | ≥2 distinct events, ≥1.0 s apart, in 10 s | Required for a live flattening warning. |
+| Flat-brightness threshold | `(max−min)/mean ≤3%` during that 10 s window | Combined with scene-change evidence, not used alone. |
+| Low-signal warning exclusion | Mean linear brightness ≤0.01 | Suppress the live scene-change heuristic on weak signals. |
+| Other warning exclusions | Suppress new scene events on unusable or Near limit images | Avoid warning from filtering/clipping artifacts. |
+| Live-warning lifetime | At least 5 s; clear after a full 10 s without fresh evidence | Cluster warning stays until repaired/dismissed. |
+| Debug history | Trailing 10 s, up to 100 processed observations at the 10 Hz target | Invalid periods remain gaps; reset on stop/mode change. |
+| Primary touch targets | ≥44×44 CSS px | For controls and keyboard focus; not a camera pixel size. |
+| Default appearance | Light theme; dark theme is an explicit saved preference | Outdoors-first visual default. |
+| Defaults for tools | Vite; Node built-in test runner; 0 UI frameworks | Small toolchain for vanilla HTML/CSS/JS. |
 
-Builder check: a fresh software-engineer reviewer read this design and reported
-no important unanswered questions preventing planning. This review does not
-replace user approval or real-device validation.
+Standard sRGB conversion, fixed rather than empirically chosen: channel breakpoint
+0.04045; linear divisor 12.92; nonlinear offset 0.055, divisor 1.055, exponent
+2.4; luminance weights R 0.2126, G 0.7152, B 0.0722. The user requested
+linearized sRGB luminance; these numbers define that conversion.
+
+The descriptor thresholds are heuristic and must be evaluated on the real phone;
+they do not prove that automatic exposure occurred. The normalization details
+can be settled in the plan without altering the numbers above. No physical
+accuracy claim follows from a passing regression or fit badge.
+
+## Confirmed requirements retained
+
+- iPhone Safari defaults to **Relative brightness (uncalibrated)** until a
+  compatible valid saved/imported/new calibration exists for the current mode.
+- Power curve `lux = a × brightness^b`, fit by regression of log10(lux) on
+  log10(brightness); R² is evaluated in that log space.
+- ≥4 samples, ≥10× reference-lux span, positive a and b, other validation gates,
+  R² ≥0.9 Good / 0.8≤R²<0.9 Fair / R²<0.8 Failed; all-rough cap at Fair.
+- Categories at 50 / 5,000 / 15,000 / 50,000 lx, with endpoints defined earlier;
+  no category for uncalibrated or outside-range readings.
+- User-chosen capture stability: reject >10% brightness variation during the
+  approximately 2 s average. Clipping: Near limit at >5%, no reading at >25%.
+- Import sequence: validate → refit raw samples → preview → confirm → replace.
+  Reject unknown versions; no migration. Exposure metadata is debug-only.
+
+## Milestone scope and next approval gates
+
+These are the user's requested milestone boundaries, not an implementation plan:
+
+- **M1:** camera on iPhone Safari, live relative brightness, Netlify HTTPS link.
+- **M2:** calibration flow, power-curve fit, persistence, JSON export/import.
+- **M3:** warnings, debug panel and polish.
+
+Pure unit tests remain mandatory throughout; injected-frame browser smoke tests
+are optional and not an M1 prerequisite. Planning should identify essential
+invalid-image/stale-frame guards needed from the first working measurement,
+with the fuller warning UI and heuristic diagnostics in M3.
+
+Next gate: user confirms the builder-defaults table. Then invoke
+`superpowers:writing-plans`, write and show an M1/M2/M3 plan, and stop for plan
+approval before any execution. Conditional design approval does not authorize
+product-code changes yet.
+
+Builder check: the preceding design was reviewed with no important unanswered
+questions. The user's subsequent scope reductions and this consolidated table
+supersede its exposure-path and migration-related details.
