@@ -3,17 +3,19 @@ import {config} from './config.js';
 import {measureFrame} from './luminance.js';
 import {initialState,reduceApp} from './state.js';
 import {createCameraController} from './camera.js';
-import {buildReading} from './lux.js';
+import {buildReading,nearLimit,clusterNotice} from './lux.js';
+import {appendHistory,buildDebugInfo,copyDebugInfo} from './debug.js';
 import {fitPowerCalibration,predictLux,summarizeCapture} from './calibration.js';
 import {loadState,saveState,exportCalibration,prepareImport,applyImport} from './storage.js';
-import {mountApp,renderApp,mountCalibration,renderCalibration,renderImportPreview,escapeHtml,dateLabel} from './ui.js';
+import {mountApp,renderApp,mountCalibration,renderCalibration,renderImportPreview,mountDebug,renderDebug,escapeHtml,dateLabel} from './ui.js';
 
-const root=document.querySelector('#app');mountApp(root);mountCalibration(root);
+const root=document.querySelector('#app');mountApp(root);mountCalibration(root);mountDebug(root);
 let storage;try{storage=window.localStorage;}catch{}
 const loaded=loadState(storage);
 let state=reduceApp(initialState(),{type:'load-saved',savedState:loaded.savedState});
 let storageWarning=loaded.warning,captureTimer=null,rearVerified=false;
 let importProposal=null;
+let debugHistory=[],debugInfo=null;
 for(const mode of ['diffuser','no-diffuser'])if(!state.modes[mode].draft.length&&!state.modes[mode].active)state.modes[mode].cameraSetup.setupId=crypto.randomUUID();
 document.documentElement.dataset.theme=state.preferences.theme;
 root.querySelector('#theme').checked=state.preferences.theme==='dark';
@@ -24,10 +26,10 @@ const camera=createCameraController({video,mediaDevices:navigator.mediaDevices,o
  else if(status==='starting'){rearVerified=false;dispatch({type:'start'});}
  else if(status==='live'){dispatch({type:'camera-ready'});checkCameraSetup();}
  else if(status==='stopped')dispatch({type:'camera-stopped'});
- },onFrame:frame=>dispatch({type:'frame',epoch:state.epoch,stats:measureFrame({...frame,mode:state.mode})})});
+ },onFrame:frame=>{const stats=measureFrame({...frame,mode:state.mode});debugHistory=appendHistory(debugHistory,stats);dispatch({type:'frame',epoch:state.epoch,stats});}});
 const persisted=new Set(['sample-complete','sample-delete','sample-undo','calibration-check-result','setup-reset-confirmed','preferences-change','mode-change','camera-settings']);
 function persist(){const result=saveState(storage,state);storageWarning=result.ok?null:result.reason;}
-function dispatch(action){state=reduceApp(state,action);if(!state.capture&&captureTimer){clearTimeout(captureTimer);captureTimer=null;}if(persisted.has(action.type))persist();paint();}
+function dispatch(action){state=reduceApp(state,action);if(['mode-change','camera-stopped','camera-error'].includes(action.type))debugHistory=[];if(!state.capture&&captureTimer){clearTimeout(captureTimer);captureTimer=null;}if(persisted.has(action.type))persist();paint();}
 function checkCameraSetup(){dispatch({type:'camera-settings',cameraId:camera.getDiagnostics().settings.deviceId??null});}
 function activeModel(){const m=state.modes[state.mode];return !state.setupMismatch&&m.active?.setupId===m.cameraSetup.setupId?m.active:null;}
 function paint(){
@@ -35,16 +37,25 @@ function paint(){
  const model=activeModel(),prediction=brightness?predictLux(model,brightness):null;
  const reading=buildReading({phase:state.phase,stats:state.stats,prediction,brightness,frameAgeMs:performance.now()-(state.stats?.at??0),recoveryCount:state.recoveryCount});
  renderApp(root,{...state,reading},{start,toggle:()=>state.phase==='live'||state.phase==='starting'?camera.stop():start()});
+ if(video.videoWidth&&video.videoHeight){const preview=root.querySelector('.preview'),scale=Math.min(preview.clientWidth/video.videoWidth,preview.clientHeight/video.videoHeight),fraction=config.crops[state.mode],overlay=root.querySelector('#crop-overlay');overlay.style.width=video.videoWidth*scale*fraction+'px';overlay.style.height=video.videoHeight*scale*fraction+'px';}
  renderCalibration(root,{...state,now:performance.now()},{save:saveSample,delete:id=>dispatch({type:'sample-delete',id}),undo:()=>dispatch({type:'sample-undo'}),check:checkFit,reset:resetSetup});
  const quality=root.querySelector('#quality-line');
  quality.innerHTML=model?`<span class="badge ${model.quality==='Fair'?'fair':''}">${model.quality}</span><span>${escapeHtml(dateLabel(model.calibratedAt))} · ${model.samples.every(s=>s.source==='lux-meter')?'Lux meter':model.samples.some(s=>s.source==='lux-meter')?'Mixed references':'Rough reference'}</span>`:'<span>No valid calibration for this mode/setup</span>';
  const notices=[];
+ if(state.phase==='live'&&nearLimit(state.stats?.clippedFraction))notices.push('Near limit – '+Math.round(state.stats.clippedFraction*100)+'% of pixels are clipped. Keep the sun out of frame.');
+ const draftFit=fitPowerCalibration(state.modes[state.mode].draft,{mode:state.mode,calibratedAt:new Date().toISOString()});
+ const cluster=clusterNotice(draftFit,{dismissed:state.clusterDismissed[state.mode]});
+ if(cluster)notices.push(cluster.message+' Try darker and brighter light using the same diffuser.');
  if(storageWarning)notices.push(storageWarning);
  if(state.setupMismatch)notices.push('The rear camera changed. Start a new setup before calibration.');
  if(model&&state.fitResults[state.mode]?.ok===false)notices.push('Using previous calibration from '+dateLabel(model.calibratedAt)+'. The new attempt did not replace it.');
  if(reading.kind==='outside')notices.push(`Beyond your tested range (${model.luxRange.map(n=>Math.round(n).toLocaleString()).join('–')} lx). This extrapolated estimate is unverified. Add a reference sample in this light.`);
  root.querySelector('#reading-notices').innerHTML=notices.map(n=>`<p class="notice neutral">${escapeHtml(n)}</p>`).join('');
+ if(cluster){const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='text-button';dismiss.textContent='Dismiss calibration warning';dismiss.onclick=()=>dispatch({type:'dismiss-cluster'});root.querySelector('#reading-notices').append(dismiss);}
+ debugInfo=buildDebugInfo({history:debugHistory,stats:state.stats,model,draft:state.modes[state.mode].draft,cameraDiagnostics:camera.getDiagnostics(),mode:state.mode});
+ renderDebug(root,debugInfo,copyDebug);
 }
+async function copyDebug(){const result=await copyDebugInfo(debugInfo,text=>navigator.clipboard.writeText(text));root.querySelector('#copy-status').textContent=result.ok?'Debug info copied.':'Clipboard unavailable. Select and copy the text below.';const fallback=root.querySelector('#copy-fallback');fallback.hidden=result.ok;fallback.value=result.text;if(!result.ok){fallback.focus();fallback.select();}}
 function start(){root.querySelector('#guide').hidden=true;dispatch({type:'preferences-change',preferences:{guideSeen:true}});camera.start();}
 function saveSample(){
  const settings=camera.getDiagnostics().settings;

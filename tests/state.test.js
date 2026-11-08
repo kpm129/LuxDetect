@@ -33,6 +33,12 @@ test('known rear camera identity change blocks capture until explicit new setup'
  assert.equal(s.setupMismatch,true);
  assert.equal(reduceApp(s,{type:'sample-start',token:'x',referenceLux:50,source:'lux-meter',at:0}).capture,null);
 });
+test('invalid completion for current token ends capture with a retry message',()=>{
+ let s=reduceApp(initialState(),{type:'camera-ready'});
+ s=reduceApp(s,{type:'sample-start',token:'x',referenceLux:123,source:'lux-meter',at:0});
+ s=reduceApp(s,{type:'sample-complete',token:'x',sample:makeSample({setupId:s.capture.setupId,referenceLux:123,brightness:NaN})});
+ assert.equal(s.capture,null);assert.ok(s.captureError.includes('Try again'));
+});
 test('only live distinct frames count, smoothing resets on invalid data',()=>{
  let s=reduceApp(initialState(),{type:'start'});s=reduceApp(s,{type:'camera-ready'});
  for(let i=0;i<3;i++)s=reduceApp(s,{type:'frame',epoch:s.epoch,stats:{at:i*100,videoTime:i/10,brightness:.5,issue:null}});

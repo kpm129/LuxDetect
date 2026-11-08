@@ -1,10 +1,16 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {relativeIndex,buildReading,classifyLightLevel} from '../src/lux.js';
+import {relativeIndex,buildReading,classifyLightLevel,nearLimit,clusterNotice} from '../src/lux.js';
 const usable={issue:null,clippedFraction:0,brightness:.42};
 const input={phase:'live',stats:usable,prediction:null,brightness:.42,frameAgeMs:0,recoveryCount:3};
 test('relative brightness is labelled honestly without lux or light categories',()=>{
  const r=buildReading(input);assert.equal(relativeIndex(.42),42);assert.equal(r.value,42);
  assert.equal(r.label,'Relative brightness (uncalibrated)');assert.equal(r.unit,null);assert.equal(r.lightLevel,null);
+});
+test('near limit boundaries; cluster warnings require actual failed calibration evidence',()=>{
+ assert.equal(nearLimit(.05),false);assert.equal(nearLimit(.05001),true);assert.equal(nearLimit(.25),true);assert.equal(nearLimit(.251),false);
+ const failed={ok:false,reasons:[{code:'brightness-span',message:'cluster'}]};
+ assert.ok(clusterNotice(failed,{dismissed:false}));assert.equal(clusterNotice(failed,{dismissed:true}),null);
+ assert.equal(clusterNotice({ok:false,reasons:[{code:'reference-span'}]},{dismissed:false}),null);
 });
 test('raw unusable frame, stale stream and recovery suppress a smoothed reading',()=>{
  assert.equal(buildReading({...input,stats:{...usable,issue:'too-bright'}}).label,'Too bright – no reading');

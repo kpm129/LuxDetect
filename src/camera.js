@@ -1,6 +1,6 @@
 /** Camera adapter. Generation checks prevent late permission/play callbacks reviving a stopped camera. */
 export function createCameraController({video,mediaDevices,onFrame,onState,now=()=>performance.now(),readFrame}){
- let generation=0,stream=null,handle=null,lastTime=-1,lastAt=-Infinity,canvas,context,observed=[];
+ let generation=0,stream=null,handle=null,lastTime=-1,lastObserved=-1,lastAt=-Infinity,canvas,context,observed=[];
  const emit=phase=>onState(phase);
  function stop(){
   generation++;
@@ -14,7 +14,7 @@ export function createCameraController({video,mediaDevices,onFrame,onState,now=(
    if(token!==generation||!stream)return;
    const time=metadata?.mediaTime??video.currentTime;
    if(time!==lastTime&&video.videoWidth&&video.videoHeight){
-    observed.push(at);observed=observed.filter(t=>at-t<=1000);
+    if(time!==lastObserved){observed.push(at);observed=observed.filter(t=>at-t<=1000);lastObserved=time;}
     if(at-lastAt>=99){
      lastAt=at;lastTime=time;
      try{
@@ -45,7 +45,7 @@ export function createCameraController({video,mediaDevices,onFrame,onState,now=(
    video.srcObject=stream;await video.play();
    if(token!==generation)return;
    stream.getVideoTracks()[0]?.addEventListener?.('ended',()=>{if(token===generation)stop();});
-   lastAt=-Infinity;lastTime=-1;emit('live');schedule(token);
+   lastAt=-Infinity;lastTime=-1;lastObserved=-1;emit('live');schedule(token);
   }catch(error){if(token!==generation)return;stop();emit({phase:'error',message:error.message==='rear-required'?'The rear camera is required. Please select the rear camera and try again.':error.name==='NotAllowedError'?'Camera permission was denied. Allow camera access in Safari settings, then try again.':error.name==='NotFoundError'?'No camera was found on this device.':'Camera unavailable or in use. Close other camera apps and try again.'});}
  }
  function getDiagnostics(){const track=stream?.getVideoTracks()[0];return {settings:track?.getSettings?.()??{},capabilities:track?.getCapabilities?.()??{},observedVideoFps:observed.length>1?(observed.length-1)*1000/(observed.at(-1)-observed[0]):null};}

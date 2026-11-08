@@ -27,7 +27,9 @@ export function summarizeCapture(frames,{startedAt,endedAt,config=defaults}){
  const spanMs=unique.length?unique.at(-1).at-unique[0].at:0;
  const maxGapMs=Math.max(0,...unique.slice(1).map((f,i)=>f.at-unique[i].at));
  if(unique.length<config.minFrames||spanMs<config.minCaptureSpanMs||maxGapMs>config.maxGapMs)return fail('Could not capture a steady camera reading. Hold still and try again.');
- const values=unique.map(f=>f.brightness),brightness=mean(values),minBrightness=Math.min(...values),maxBrightness=Math.max(...values);
+ const values=unique.map(f=>f.brightness),minBrightness=Math.min(...values),maxBrightness=Math.max(...values);
+ // The exact average cannot be outside its extrema; clamp accumulation roundoff.
+ const brightness=Math.min(maxBrightness,Math.max(minBrightness,mean(values)));
  if((maxBrightness-minBrightness)/brightness>config.maxVariation+tolerance)return fail('Light changed while sampling. Try again.');
  return {ok:true,statistics:{brightness,minBrightness,maxBrightness,sd:Math.sqrt(values.reduce((sum,x)=>sum+(x-brightness)**2,0)/(values.length-1)),frameCount:unique.length,spanMs,maxGapMs,
  worstClippedFraction:Math.max(...unique.map(f=>f.clippedFraction)),worstNearBlackFraction:Math.max(...unique.map(f=>f.nearBlackFraction)),minUsableFraction:Math.min(...unique.map(f=>f.usableFraction))}};

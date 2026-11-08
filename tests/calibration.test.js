@@ -1,9 +1,13 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {fitPowerCalibration,predictLux,summarizeCapture,classifyResidual,qualityForFit} from '../src/calibration.js';
+import {fitPowerCalibration,predictLux,summarizeCapture,classifyResidual,qualityForFit,validateSample} from '../src/calibration.js';
 import {makeSample,perfectSamples,makeFrames} from './helpers.js';
 const options={mode:'diffuser',calibratedAt:'2026-11-08T00:00:00.000Z'};
 const fit=s=>fitPowerCalibration(s,options);
 const has=(r,code)=>!r.ok&&r.reasons.some(e=>e.code===code);
+test('constant-frame floating point average remains within measured extrema and can be saved',()=>{
+ const r=summarizeCapture(makeFrames(Array(20).fill(.21586050011389926)),{startedAt:0,endedAt:2000});
+ assert.equal(r.ok,true);assert.equal(validateSample(makeSample(r.statistics)),true);
+});
 test('perfect power data, immutable sample snapshot and bounded prediction',()=>{
  const samples=perfectSamples(),r=fit(samples);assert.equal(r.ok,true);
  assert.ok(Math.abs(r.model.a-100000)<1e-6);assert.ok(Math.abs(r.model.b-2)<1e-12);assert.equal(r.model.quality,'Good');

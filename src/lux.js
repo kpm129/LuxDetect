@@ -1,5 +1,9 @@
 import {config} from './config.js';
 export const relativeIndex=b=>Math.round(Math.min(1,Math.max(0,b))*100);
+export const nearLimit=f=>f>config.nearLimit&&f<=config.clipLimit;
+export function clusterNotice(result,{dismissed=false}={}){
+ return !dismissed&&result?.ok===false&&result.reasons.some(r=>['brightness-span','brightness-groups','brightness-noise'].includes(r.code))?{code:'cluster',message:'Samples too similar – camera may be flattening brightness.'}:null;
+}
 export function classifyLightLevel(lux){
  if(!Number.isFinite(lux)||lux<0)return null;
  return lux<50?'Dark':lux<5000?'Overcast':lux<15000?'Shade':lux<=50000?'Daylight':'Bright sky';

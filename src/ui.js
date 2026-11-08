@@ -76,3 +76,17 @@ export function renderImportPreview(root,prepared,handlers){
  holder.querySelector('#cancel-import').onclick=handlers.cancel;
  holder.scrollIntoView({behavior:'smooth',block:'center'});
 }
+export function mountDebug(root){
+ root.querySelector('#debug-root').innerHTML=`<details id="debug-panel"><summary>Debug details</summary><p class="small muted">Camera statistics and the saved curve. Exposure metadata is informational only.</p><div id="debug-statistics"></div><h3>Brightness · last 10 seconds</h3><svg id="brightness-sparkline" viewBox="0 0 280 90" role="img" aria-label="Linear brightness over the last ten seconds"></svg><div class="sparkline-labels"><span>−10 s</span><span>Now</span></div><p class="small muted">Vertical scale: linear brightness 0–1. Gaps mean unusable frames.</p><div id="debug-capabilities"></div><button type="button" class="secondary" id="copy-debug">Copy debug info</button><p id="copy-status" role="status" class="small muted"></p><textarea id="copy-fallback" class="debug-fallback" aria-label="Debug information for manual copying" readonly hidden></textarea><div id="debug-samples"></div></details>`;
+}
+export function renderDebug(root,info,copy){
+ const panel=root.querySelector('#debug-panel');root.querySelector('#copy-debug').onclick=copy;if(!panel.open)return;
+ const number=(n,d=2)=>Number.isFinite(n)?n.toFixed(d):'Unavailable';
+ const cells=[['Raw linear brightness',number(info.brightness,4)],['Clipped',number(info.clippedPercent)+'%'],['Near-black',number(info.nearBlackPercent)+'%'],['Usable',number(info.usablePercent)+'%'],['Video FPS (observed)',number(info.video.observedFps,1)],['Processed FPS',number(info.video.processedFps,1)],['Video resolution',info.video.width?`${info.video.width} × ${info.video.height}`:'Unavailable'],['Measurement area',info.video.measurementArea?`${info.video.measurementArea.width} × ${info.video.measurementArea.height} px`:'Unavailable'],['a',info.fit?.a.toPrecision(5)??'Uncalibrated'],['b',number(info.fit?.b,4)],['R² · log scale',number(info.fit?.r2,4)],['Samples',info.fit?.sampleCount??0]];
+ root.querySelector('#debug-statistics').innerHTML='<dl class="stats">'+cells.map(([label,value])=>`<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')+'</dl>';
+ const end=info.history.at(-1)?.at??0;let path='',drawing=false;
+ for(const point of info.history){if(point.brightness==null){drawing=false;continue;}const x=280*(1-(end-point.at)/10000),y=80-70*point.brightness;path+=(drawing?' L':' M')+x.toFixed(2)+','+y.toFixed(2);drawing=true;}
+ root.querySelector('#brightness-sparkline').innerHTML=`<path d="M0 10H280M0 80H280" stroke="var(--line)"/><path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+ root.querySelector('#debug-capabilities').innerHTML='<h3>Browser capabilities</h3><ul class="small muted">'+Object.entries(info.capabilities).map(([k,v])=>`<li>${k}: ${escapeHtml(v.status)}${v.value!=null?' · '+escapeHtml(String(v.value)):''}</li>`).join('')+'</ul><p class="small muted">'+escapeHtml(info.metadataNote)+'</p>';
+ root.querySelector('#debug-samples').innerHTML='<h3>Editable sample list</h3><div class="table-wrap"><table><thead><tr><th>Lux</th><th>Brightness</th><th>Source</th></tr></thead><tbody>'+info.samples.map(s=>`<tr><td>${s.referenceLux.toLocaleString()}</td><td>${s.brightness.toFixed(4)}</td><td>${escapeHtml(sourceLabel(s.source))}</td></tr>`).join('')+'</tbody></table></div>';
+}

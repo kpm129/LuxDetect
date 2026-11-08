@@ -15,7 +15,7 @@ export function measureFrame({rgba,width,height,mode,at,videoTime},config=defaul
   if(!rgba||rgba.length!==width*height*4) throw new Error('Incomplete video frame.');
   let clipped=0,black=0,usable=0,sum=0;
   for(let y=crop.y;y<crop.y+crop.height;y++) for(let x=crop.x;x<crop.x+crop.width;x++){
-    const i=(y*width+x)*4,[r,g,b]=[rgba[i],rgba[i+1],rgba[i+2]];
+    const i=(y*width+x)*4,r=rgba[i],g=rgba[i+1],b=rgba[i+2];
     if(Math.max(r,g,b)>=config.clippedChannel){clipped++;continue;}
     if(Math.max(r,g,b)<=config.blackChannel){black++;continue;}
     sum+=.2126*linear[r]+.7152*linear[g]+.0722*linear[b];usable++;

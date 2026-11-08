@@ -28,7 +28,8 @@ export function reduceApp(s,a){
  case 'sample-cancel':return {...s,capture:null};
  case 'sample-reject':if(s.capture?.token!==a.token)return s;return {...s,capture:null,captureError:a.message};
  case 'sample-complete':{
-  if(s.capture?.token!==a.token||s.capture.mode!==s.mode||!validateSample(a.sample)||a.sample.setupId!==s.capture.setupId||a.sample.referenceLux!==s.capture.referenceLux||a.sample.source!==s.capture.source)return s;
+  if(s.capture?.token!==a.token||s.capture.mode!==s.mode)return s;
+  if(!validateSample(a.sample)||a.sample.setupId!==s.capture.setupId||a.sample.referenceLux!==s.capture.referenceLux||a.sample.source!==s.capture.source)return {...s,capture:null,captureError:'Could not save that sample. Try again.'};
   return {...updateMode(s,{...s.modes[s.mode],draft:[...s.modes[s.mode].draft,a.sample]}),capture:null,captureError:null,fitResults:{...s.fitResults,[s.mode]:null},clusterDismissed:{...s.clusterDismissed,[s.mode]:false}};
  }
  case 'sample-delete':{
