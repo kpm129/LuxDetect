@@ -40,7 +40,12 @@ settings if using a CLI/API deployment; never paste a token into chat.
 
 ## Selected release route
 
-The user selected a new site with manual upload. Download the release ZIP,
-unzip it, then drag the extracted site folder (containing index.html and assets/)
-onto https://app.netlify.com/drop while signed in. Send the resulting HTTPS URL
-for remote checks; the physical Safari checklist still needs the actual phone.
+Use GitHub repository `kpm129/LuxDetect`, branch `main`, as the deployment source:
+in Netlify choose **Import from Git**, connect that repository, and deploy its
+`main` branch. `netlify.toml` supplies the build command, publish directory and
+Node 20 version. `package-lock.json` is committed and the build uses `npm ci`.
+
+This replaces the earlier ZIP/manual-upload route because the cloud ZIP could
+not be downloaded. The manual instructions above remain an optional alternative.
+Send the resulting HTTPS URL for remote checks; the physical Safari checklist
+still needs the actual phone.
