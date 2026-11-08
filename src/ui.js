@@ -45,6 +45,7 @@ export function renderCalibration(root,state,handlers){
  for(const field of q('sample-form').elements)field.disabled=busy;
  q('save-sample').disabled=busy||state.phase!=='live'||m.draft.length>=200||Boolean(state.setupMismatch);
  q('check-calibration').disabled=busy;q('reset-setup').disabled=busy;
+ q('import-calibration').disabled=busy;q('export-calibration').disabled=busy;
  q('capture-status').textContent=busy?`Hold steady… ${Math.min(2,(state.now-state.capture.at)/1000).toFixed(1)} / 2 s`:'';
  q('capture-progress').hidden=!busy;q('capture-progress').value=busy?Math.min(2000,state.now-state.capture.at):0;
  q('capture-error').textContent=state.captureError??'';q('capture-error').className=state.captureError?'notice failure':'';
@@ -66,4 +67,12 @@ export function renderCalibration(root,state,handlers){
  q('sample-form').onsubmit=e=>{e.preventDefault();handlers.save();};
  q('sample-list').onclick=e=>{const button=e.target.closest('[data-delete]');if(button)handlers.delete(button.dataset.delete);};
  q('check-calibration').onclick=handlers.check;q('reset-setup').onclick=handlers.reset;
+}
+export function renderImportPreview(root,prepared,handlers){
+ const holder=root.querySelector('#transfer-root');
+ holder.innerHTML=`<div class="notice neutral"><h3>Review imported calibration</h3><ul>${prepared.summary.map(s=>`<li><strong>${s.mode==='diffuser'?'Sky + diffuser':'Sky – no diffuser'}</strong><br>${s.quality??'No active calibration'} · ${s.sampleCount} editable samples${s.calibratedAt?' · '+escapeHtml(dateLabel(s.calibratedAt)):''}${s.range?'<br>'+s.range.map(x=>Math.round(x).toLocaleString()).join('–')+' lx':''}<br>${escapeHtml(s.sources.map(sourceLabel).join(', '))}</li>`).join('')}</ul><p>Only these modes will be replaced. Existing data stays unchanged until you confirm.</p><label class="confirm-setup"><input type="checkbox" id="confirm-import-setup"> I am using the same phone, rear lens and diffuser setup as these measurements.</label><button type="button" id="confirm-import" class="primary" disabled>Import and replace these modes</button><button type="button" id="cancel-import" class="secondary">Cancel</button></div>`;
+ holder.querySelector('#confirm-import-setup').onchange=e=>holder.querySelector('#confirm-import').disabled=!e.target.checked;
+ holder.querySelector('#confirm-import').onclick=()=>{if(holder.querySelector('#confirm-import-setup').checked)handlers.confirm();};
+ holder.querySelector('#cancel-import').onclick=handlers.cancel;
+ holder.scrollIntoView({behavior:'smooth',block:'center'});
 }

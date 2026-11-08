@@ -46,3 +46,23 @@ export function saveState(storage,savedState){
  try{const {schemaVersion,processingVersion,preferences,modes}=savedState;storage.setItem(STORAGE_KEY,JSON.stringify({schemaVersion,processingVersion,preferences,modes}));return {ok:true,reason:null};}
  catch{return {ok:false,reason:'Calibration could not be saved on this device. Export a backup before closing.'};}
 }
+export function exportCalibration(savedState){
+ const modes={};
+ for(const mode of MODES){const record=savedState.modes[mode];modes[mode]={draft:structuredClone(record.draft),active:structuredClone(record.active),cameraSetup:{setupId:record.cameraSetup.setupId}};}
+ return JSON.stringify({schemaVersion:1,processingVersion:1,modes},null,2);
+}
+export function prepareImport(jsonText,{byteLength,config=defaults}={}){
+ try{
+  if(typeof jsonText!=='string'||Math.max(byteLength??0,new TextEncoder().encode(jsonText).length)>config.maxImportBytes)throw new Error('File exceeds the 1 MiB limit.');
+  const proposal=cleanDocument(JSON.parse(jsonText),config,{partial:true});
+  // Portable input never gets to select a private local camera identity.
+  for(const record of Object.values(proposal.modes))record.cameraSetup.cameraId=null;
+  const summary=Object.entries(proposal.modes).map(([mode,r])=>({mode,quality:r.active?.quality??null,calibratedAt:r.active?.calibratedAt??null,range:r.active?.luxRange??null,sampleCount:r.draft.length,sources:[...new Set((r.active?.samples??r.draft).map(s=>s.source))]}));
+  return {ok:true,proposal,summary};
+ }catch(error){return {ok:false,reasons:[{code:'import',message:error.message||'The calibration file could not be read.'}]};}
+}
+export function applyImport(savedState,proposal){
+ const next=structuredClone(savedState);
+ for(const mode of MODES)if(Object.hasOwn(proposal.modes,mode))next.modes[mode]=structuredClone(proposal.modes[mode]);
+ return next;
+}

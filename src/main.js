@@ -5,14 +5,15 @@ import {initialState,reduceApp} from './state.js';
 import {createCameraController} from './camera.js';
 import {buildReading} from './lux.js';
 import {fitPowerCalibration,predictLux,summarizeCapture} from './calibration.js';
-import {loadState,saveState} from './storage.js';
-import {mountApp,renderApp,mountCalibration,renderCalibration,escapeHtml,dateLabel} from './ui.js';
+import {loadState,saveState,exportCalibration,prepareImport,applyImport} from './storage.js';
+import {mountApp,renderApp,mountCalibration,renderCalibration,renderImportPreview,escapeHtml,dateLabel} from './ui.js';
 
 const root=document.querySelector('#app');mountApp(root);mountCalibration(root);
 let storage;try{storage=window.localStorage;}catch{}
 const loaded=loadState(storage);
 let state=reduceApp(initialState(),{type:'load-saved',savedState:loaded.savedState});
 let storageWarning=loaded.warning,captureTimer=null,rearVerified=false;
+let importProposal=null;
 for(const mode of ['diffuser','no-diffuser'])if(!state.modes[mode].draft.length&&!state.modes[mode].active)state.modes[mode].cameraSetup.setupId=crypto.randomUUID();
 document.documentElement.dataset.theme=state.preferences.theme;
 root.querySelector('#theme').checked=state.preferences.theme==='dark';
@@ -62,6 +63,30 @@ function saveSample(){
 }
 function checkFit(){dispatch({type:'calibration-check-result',result:fitPowerCalibration(state.modes[state.mode].draft,{mode:state.mode,calibratedAt:new Date().toISOString()})});}
 function resetSetup(){if(confirm('Start a new setup? This replaces this mode’s editable samples. Export a backup first if you need them. The old calibration is kept but will not be used for the changed setup.'))dispatch({type:'setup-reset-confirmed',setupId:crypto.randomUUID(),cameraId:camera.getDiagnostics().settings.deviceId??null});}
+const transfer=root.querySelector('#transfer-root');
+const transferMessage=document.createElement('p');transferMessage.className='small muted';transferMessage.setAttribute('role','status');transfer.before(transferMessage);
+const importFile=document.createElement('input');importFile.type='file';importFile.accept='.json,application/json';importFile.hidden=true;transfer.after(importFile);
+for(const id of ['export-calibration','import-calibration'])root.querySelector('#'+id).hidden=false;
+root.querySelector('#export-calibration').onclick=()=>{
+ try{const blob=new Blob([exportCalibration(state)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='luxdetect-calibration-'+new Date().toISOString().slice(0,10)+'.json';a.hidden=true;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);transferMessage.textContent='Backup prepared. Check Downloads or Files to confirm it was saved.';}
+ catch{transferMessage.textContent='Could not prepare a backup. Please try again.';}
+};
+root.querySelector('#import-calibration').onclick=()=>{importFile.value='';importFile.click();};
+importFile.onchange=async()=>{
+ const file=importFile.files?.[0];if(!file)return;importProposal=null;transfer.replaceChildren();
+ if(file.size>config.maxImportBytes){transferMessage.textContent='File exceeds the 1 MiB limit.';return;}
+ try{
+  const prepared=prepareImport(await file.text(),{byteLength:file.size});
+  if(!prepared.ok){transferMessage.textContent=prepared.reasons.map(r=>r.message).join(' ');return;}
+  importProposal=prepared.proposal;transferMessage.textContent='File validated and refitted. Review before replacing any data.';
+  renderImportPreview(root,prepared,{cancel:()=>{importProposal=null;transfer.replaceChildren();transferMessage.textContent='Import cancelled. Existing calibration was kept.';},confirm:()=>{
+   if(!importProposal||state.capture)return;
+   const next=applyImport(state,importProposal),cameraId=camera.getDiagnostics().settings.deviceId??null;
+   for(const mode of Object.keys(importProposal.modes))next.modes[mode].cameraSetup.cameraId=cameraId;
+   state={...state,modes:next.modes,fitResults:{},undo:null,capture:null,setupMismatch:false};importProposal=null;transfer.replaceChildren();persist();paint();transferMessage.textContent=storageWarning??'Calibration imported and saved on this device.';
+  }});
+ }catch{transferMessage.textContent='Could not read that calibration file. Existing data was kept.';}
+};
 root.querySelector('#guide-link').onclick=()=>{root.querySelector('#guide').hidden=false;root.querySelector('#guide').scrollIntoView({behavior:'smooth'});};
 root.querySelector('#close-guide').onclick=()=>{root.querySelector('#guide').hidden=true;dispatch({type:'preferences-change',preferences:{guideSeen:true}});};
 root.querySelector('#theme').onchange=e=>{const theme=e.target.checked?'dark':'light';document.documentElement.dataset.theme=theme;dispatch({type:'preferences-change',preferences:{theme}});};
