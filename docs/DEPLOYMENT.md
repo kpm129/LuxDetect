@@ -19,7 +19,7 @@ Node 24. No push to a shared branch is necessary for a manual deployment.
 ## First HTTPS test on iPhone
 
 1. Sign in to your Netlify account and choose a manual deployment / drag-and-drop
-   deployment. Upload the built `dist` folder (or the supplied deployment ZIP).
+   deployment. Upload the built `dist` folder (or unzip the supplied deployment ZIP and upload its extracted folder).
 2. Open the resulting `https://…netlify.app` address in iPhone Safari.
 3. Follow [the test checklist](TESTING.md). Camera access starts only after a tap.
 
@@ -36,3 +36,10 @@ A different site/browser or cleared site data will not share calibration.
 A local build or desktop screenshot does not establish Netlify publication or
 iPhone camera behavior. Supply credentials only through secure environment
 settings if using a CLI/API deployment; never paste a token into chat.
+
+## Selected release route
+
+The user selected a new site with manual upload. Download the release ZIP,
+unzip it, then drag the extracted site folder (containing index.html and assets/)
+onto https://app.netlify.com/drop while signed in. Send the resulting HTTPS URL
+for remote checks; the physical Safari checklist still needs the actual phone.

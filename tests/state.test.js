@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {initialState,reduceApp} from '../src/state.js';
 import {makeSample,perfectSamples} from './helpers.js';
 import {fitPowerCalibration} from '../src/calibration.js';
+function liveState(){let s=reduceApp(initialState(),{type:'camera-ready'});for(let i=0;i<3;i++)s=reduceApp(s,{type:'frame',epoch:s.epoch,stats:{at:i*100,videoTime:i/10,brightness:.2,issue:null}});return s;}
 test('mode change clears history, does not start camera and rejects stale epochs',()=>{
  const s=initialState(),m=reduceApp({...s,history:[{at:0,brightness:.5}],stats:{}},{type:'mode-change',mode:'no-diffuser'});
  assert.equal(m.mode,'no-diffuser');assert.equal(m.phase,'stopped');assert.deepEqual(m.history,[]);assert.equal(m.stats,null);
@@ -16,8 +17,8 @@ test('failed fit preserves prior active model; deleting/undoing only changes dra
  const restored=reduceApp(deleted,{type:'sample-undo'});assert.deepEqual(restored.modes.diffuser.draft,samples);
 });
 test('capture is frozen and late completion after mode switch cannot add a sample',()=>{
- let s=reduceApp(initialState(),{type:'camera-ready'});
- s=reduceApp(s,{type:'sample-start',token:'a',referenceLux:123,source:'lux-meter',at:0});assert.equal(s.capture.referenceLux,123);
+ let s=liveState();
+ s=reduceApp(s,{type:'sample-start',token:'a',referenceLux:123,source:'lux-meter',at:250});assert.equal(s.capture.referenceLux,123);
  s=reduceApp(s,{type:'mode-change',mode:'no-diffuser'});assert.equal(s.capture,null);
  s=reduceApp(s,{type:'sample-complete',token:'a',sample:makeSample()});assert.equal(s.modes.diffuser.draft.length,0);
  assert.equal(reduceApp(initialState(),{type:'sample-start',token:'a',referenceLux:-1,source:'lux-meter',at:0}).capture,null);
@@ -34,10 +35,22 @@ test('known rear camera identity change blocks capture until explicit new setup'
  assert.equal(reduceApp(s,{type:'sample-start',token:'x',referenceLux:50,source:'lux-meter',at:0}).capture,null);
 });
 test('invalid completion for current token ends capture with a retry message',()=>{
- let s=reduceApp(initialState(),{type:'camera-ready'});
- s=reduceApp(s,{type:'sample-start',token:'x',referenceLux:123,source:'lux-meter',at:0});
+ let s=liveState();
+ s=reduceApp(s,{type:'sample-start',token:'x',referenceLux:123,source:'lux-meter',at:250});
  s=reduceApp(s,{type:'sample-complete',token:'x',sample:makeSample({setupId:s.capture.setupId,referenceLux:123,brightness:NaN})});
  assert.equal(s.capture,null);assert.ok(s.captureError.includes('Try again'));
+});
+test('sample entry requires a recovered fresh usable frame, not just a live phase',()=>{
+ const good=liveState(),start={type:'sample-start',token:'x',referenceLux:100,source:'lux-meter',at:250};
+ for(const s of [{...good,stats:null},{...good,stats:{...good.stats,issue:'too-bright'}},{...good,stats:{...good.stats,issue:'too-dark'}},{...good,stats:{...good.stats,at:-5000}},{...good,recoveryCount:2}])assert.equal(reduceApp(s,start).capture,null);
+ assert.ok(reduceApp(good,start).capture);
+});
+test('partial confirmed import preserves unrelated mode camera mismatch and sample guard',()=>{
+ const s={...liveState(),setupMismatch:true};
+ const imported={draft:[],active:null,cameraSetup:{setupId:'imported-bare',cameraId:null}};
+ const next=reduceApp(s,{type:'import-confirmed',proposal:{modes:{'no-diffuser':imported}},cameraId:'new-camera'});
+ assert.equal(next.modes['no-diffuser'].cameraSetup.setupId,'imported-bare');assert.equal(next.setupMismatch,true);
+ assert.equal(reduceApp(next,{type:'sample-start',token:'x',referenceLux:100,source:'lux-meter',at:250}).capture,null);
 });
 test('only live distinct frames count, smoothing resets on invalid data',()=>{
  let s=reduceApp(initialState(),{type:'start'});s=reduceApp(s,{type:'camera-ready'});

@@ -8,6 +8,11 @@ test('constant-frame floating point average remains within measured extrema and 
  const r=summarizeCapture(makeFrames(Array(20).fill(.21586050011389926)),{startedAt:0,endedAt:2000});
  assert.equal(r.ok,true);assert.equal(validateSample(makeSample(r.statistics)),true);
 });
+test('a real nonfatal outlier remains in a successful model with its flag',()=>{
+ const samples=perfectSamples();samples[2].referenceLux*=10**.3;
+ const result=fit(samples);assert.equal(result.ok,true);assert.equal(result.model.samples.length,5);
+ assert.ok(result.model.flags.some(f=>f.sampleId===samples[2].id&&f.residual>.2&&f.residual<=.3));
+});
 test('perfect power data, immutable sample snapshot and bounded prediction',()=>{
  const samples=perfectSamples(),r=fit(samples);assert.equal(r.ok,true);
  assert.ok(Math.abs(r.model.a-100000)<1e-6);assert.ok(Math.abs(r.model.b-2)<1e-12);assert.equal(r.model.quality,'Good');

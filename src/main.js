@@ -6,7 +6,7 @@ import {createCameraController} from './camera.js';
 import {buildReading,nearLimit,clusterNotice} from './lux.js';
 import {appendHistory,buildDebugInfo,copyDebugInfo} from './debug.js';
 import {fitPowerCalibration,predictLux,summarizeCapture} from './calibration.js';
-import {loadState,saveState,exportCalibration,prepareImport,applyImport} from './storage.js';
+import {loadState,saveState,exportCalibration,prepareImport} from './storage.js';
 import {mountApp,renderApp,mountCalibration,renderCalibration,renderImportPreview,mountDebug,renderDebug,escapeHtml,dateLabel} from './ui.js';
 
 const root=document.querySelector('#app');mountApp(root);mountCalibration(root);mountDebug(root);
@@ -27,8 +27,8 @@ const camera=createCameraController({video,mediaDevices:navigator.mediaDevices,o
  else if(status==='live'){dispatch({type:'camera-ready'});checkCameraSetup();}
  else if(status==='stopped')dispatch({type:'camera-stopped'});
  },onFrame:frame=>{const stats=measureFrame({...frame,mode:state.mode});debugHistory=appendHistory(debugHistory,stats);dispatch({type:'frame',epoch:state.epoch,stats});}});
-const persisted=new Set(['sample-complete','sample-delete','sample-undo','calibration-check-result','setup-reset-confirmed','preferences-change','mode-change','camera-settings']);
-function persist(){const result=saveState(storage,state);storageWarning=result.ok?null:result.reason;}
+const persisted=new Set(['sample-complete','sample-delete','sample-undo','calibration-check-result','setup-reset-confirmed','preferences-change','mode-change','camera-settings','import-confirmed']);
+function persist(){const result=saveState(storage,state);storageWarning=result.ok?null:result.reason;if(result.ok)state={...state,...result.timestamps};}
 function dispatch(action){state=reduceApp(state,action);if(['mode-change','camera-stopped','camera-error'].includes(action.type))debugHistory=[];if(!state.capture&&captureTimer){clearTimeout(captureTimer);captureTimer=null;}if(persisted.has(action.type))persist();paint();}
 function checkCameraSetup(){dispatch({type:'camera-settings',cameraId:camera.getDiagnostics().settings.deviceId??null});}
 function activeModel(){const m=state.modes[state.mode];return !state.setupMismatch&&m.active?.setupId===m.cameraSetup.setupId?m.active:null;}
@@ -38,7 +38,7 @@ function paint(){
  const reading=buildReading({phase:state.phase,stats:state.stats,prediction,brightness,frameAgeMs:performance.now()-(state.stats?.at??0),recoveryCount:state.recoveryCount});
  renderApp(root,{...state,reading},{start,toggle:()=>state.phase==='live'||state.phase==='starting'?camera.stop():start()});
  if(video.videoWidth&&video.videoHeight){const preview=root.querySelector('.preview'),scale=Math.min(preview.clientWidth/video.videoWidth,preview.clientHeight/video.videoHeight),fraction=config.crops[state.mode],overlay=root.querySelector('#crop-overlay');overlay.style.width=video.videoWidth*scale*fraction+'px';overlay.style.height=video.videoHeight*scale*fraction+'px';}
- renderCalibration(root,{...state,now:performance.now()},{save:saveSample,delete:id=>dispatch({type:'sample-delete',id}),undo:()=>dispatch({type:'sample-undo'}),check:checkFit,reset:resetSetup});
+ renderCalibration(root,{...state,storageWarning,now:performance.now()},{save:saveSample,delete:id=>dispatch({type:'sample-delete',id}),undo:()=>dispatch({type:'sample-undo'}),check:checkFit,reset:resetSetup});
  const quality=root.querySelector('#quality-line');
  quality.innerHTML=model?`<span class="badge ${model.quality==='Fair'?'fair':''}">${model.quality}</span><span>${escapeHtml(dateLabel(model.calibratedAt))} · ${model.samples.every(s=>s.source==='lux-meter')?'Lux meter':model.samples.some(s=>s.source==='lux-meter')?'Mixed references':'Rough reference'}</span>`:'<span>No valid calibration for this mode/setup</span>';
  const notices=[];
@@ -52,7 +52,7 @@ function paint(){
  if(reading.kind==='outside')notices.push(`Beyond your tested range (${model.luxRange.map(n=>Math.round(n).toLocaleString()).join('–')} lx). This extrapolated estimate is unverified. Add a reference sample in this light.`);
  root.querySelector('#reading-notices').innerHTML=notices.map(n=>`<p class="notice neutral">${escapeHtml(n)}</p>`).join('');
  if(cluster){const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='text-button';dismiss.textContent='Dismiss calibration warning';dismiss.onclick=()=>dispatch({type:'dismiss-cluster'});root.querySelector('#reading-notices').append(dismiss);}
- debugInfo=buildDebugInfo({history:debugHistory,stats:state.stats,model,draft:state.modes[state.mode].draft,cameraDiagnostics:camera.getDiagnostics(),mode:state.mode});
+ debugInfo=buildDebugInfo({history:debugHistory,stats:state.stats,model,draft:state.modes[state.mode].draft,cameraDiagnostics:camera.getDiagnostics(),mode:state.mode,now:performance.now()});
  renderDebug(root,debugInfo,copyDebug);
 }
 async function copyDebug(){const result=await copyDebugInfo(debugInfo,text=>navigator.clipboard.writeText(text));root.querySelector('#copy-status').textContent=result.ok?'Debug info copied.':'Clipboard unavailable. Select and copy the text below.';const fallback=root.querySelector('#copy-fallback');fallback.hidden=result.ok;fallback.value=result.text;if(!result.ok){fallback.focus();fallback.select();}}
@@ -92,9 +92,8 @@ importFile.onchange=async()=>{
   importProposal=prepared.proposal;transferMessage.textContent='File validated and refitted. Review before replacing any data.';
   renderImportPreview(root,prepared,{cancel:()=>{importProposal=null;transfer.replaceChildren();transferMessage.textContent='Import cancelled. Existing calibration was kept.';},confirm:()=>{
    if(!importProposal||state.capture)return;
-   const next=applyImport(state,importProposal),cameraId=camera.getDiagnostics().settings.deviceId??null;
-   for(const mode of Object.keys(importProposal.modes))next.modes[mode].cameraSetup.cameraId=cameraId;
-   state={...state,modes:next.modes,fitResults:{},undo:null,capture:null,setupMismatch:false};importProposal=null;transfer.replaceChildren();persist();paint();transferMessage.textContent=storageWarning??'Calibration imported and saved on this device.';
+   dispatch({type:'import-confirmed',proposal:importProposal,cameraId:camera.getDiagnostics().settings.deviceId??null});
+   importProposal=null;transfer.replaceChildren();transferMessage.textContent=storageWarning??'Calibration imported and saved on this device.';
   }});
  }catch{transferMessage.textContent='Could not read that calibration file. Existing data was kept.';}
 };

@@ -1,9 +1,9 @@
 import {config as defaults,MODES} from './config.js';
 import {validateSample,fitPowerCalibration} from './calibration.js';
 export const STORAGE_KEY='luxdetect:v1';
-export function emptySavedState(){return {schemaVersion:1,processingVersion:1,preferences:{theme:'light',lastMode:'diffuser',guideSeen:false},modes:Object.fromEntries(MODES.map(mode=>[mode,{draft:[],active:null,cameraSetup:{setupId:mode+'-setup',cameraId:null}}]))};}
+export function emptySavedState(){return {schemaVersion:1,processingVersion:1,createdAt:null,updatedAt:null,preferences:{theme:'light',lastMode:'diffuser',guideSeen:false},modes:Object.fromEntries(MODES.map(mode=>[mode,{draft:[],active:null,cameraSetup:{setupId:mode+'-setup',cameraId:null}}]))};}
 const validDate=s=>typeof s==='string'&&Number.isFinite(Date.parse(s));
-const sampleFields=['id','mode','setupId','processingVersion','referenceLux','source','note','createdAt','brightness','sd','minBrightness','maxBrightness','frameCount','spanMs','maxGapMs','worstClippedFraction','worstNearBlackFraction','minUsableFraction'];
+const sampleFields=['id','mode','setupId','processingVersion','referenceLux','source','note','createdAt','brightness','sd','minBrightness','maxBrightness','frameCount','spanMs','maxGapMs','worstClippedFraction','worstNearBlackFraction','minUsableFraction','videoWidth','videoHeight','cropWidth','cropHeight'];
 function cleanSamples(samples,mode,config){
  if(!Array.isArray(samples)||samples.length>config.maxSamples)throw new Error('A sample collection is missing or exceeds 200 samples.');
  const cleaned=samples.map(s=>{
@@ -36,20 +36,27 @@ function cleanDocument(data,config=defaults,{partial=false}={}){
  }
  if(!Object.keys(modes).length)throw new Error('No calibration modes were found.');
  const pref=data.preferences;
- return {schemaVersion:1,processingVersion:1,preferences:{theme:pref?.theme==='dark'?'dark':'light',lastMode:MODES.includes(pref?.lastMode)?pref.lastMode:'diffuser',guideSeen:pref?.guideSeen===true},modes};
+ if([data.createdAt,data.updatedAt].some(d=>d!=null&&!validDate(d)))throw new Error('Invalid document timestamps.');
+ return {schemaVersion:1,processingVersion:1,createdAt:data.createdAt??null,updatedAt:data.updatedAt??null,preferences:{theme:pref?.theme==='dark'?'dark':'light',lastMode:MODES.includes(pref?.lastMode)?pref.lastMode:'diffuser',guideSeen:pref?.guideSeen===true},modes};
 }
 export function loadState(storage,config=defaults){
  try{const raw=storage.getItem(STORAGE_KEY);return {savedState:raw?cleanDocument(JSON.parse(raw),config):emptySavedState(),warning:null};}
  catch{return {savedState:emptySavedState(),warning:'Saved calibration could not be read. It was not used. Import a compatible backup or recalibrate.'};}
 }
-export function saveState(storage,savedState){
- try{const {schemaVersion,processingVersion,preferences,modes}=savedState;storage.setItem(STORAGE_KEY,JSON.stringify({schemaVersion,processingVersion,preferences,modes}));return {ok:true,reason:null};}
+export function saveState(storage,savedState,{at=new Date().toISOString()}={}){
+ try{
+  const original=storage.getItem?.(STORAGE_KEY);
+  let previous=null;
+  if(original){try{previous=cleanDocument(JSON.parse(original));}catch{return {ok:false,reason:'Existing saved data is unreadable or from another version and was kept. Changes are in memory only. Back up your work before clearing site data.'};}}
+  const timestamps={createdAt:savedState.createdAt??previous?.createdAt??at,updatedAt:at};
+  const {schemaVersion,processingVersion,preferences,modes}=savedState;storage.setItem(STORAGE_KEY,JSON.stringify({schemaVersion,processingVersion,...timestamps,preferences,modes}));return {ok:true,reason:null,timestamps};
+ }
  catch{return {ok:false,reason:'Calibration could not be saved on this device. Export a backup before closing.'};}
 }
 export function exportCalibration(savedState){
  const modes={};
  for(const mode of MODES){const record=savedState.modes[mode];modes[mode]={draft:structuredClone(record.draft),active:structuredClone(record.active),cameraSetup:{setupId:record.cameraSetup.setupId}};}
- return JSON.stringify({schemaVersion:1,processingVersion:1,modes},null,2);
+ return JSON.stringify({schemaVersion:1,processingVersion:1,createdAt:savedState.createdAt??null,updatedAt:savedState.updatedAt??null,modes},null,2);
 }
 export function prepareImport(jsonText,{byteLength,config=defaults}={}){
  try{

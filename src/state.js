@@ -1,8 +1,12 @@
 import {config,MODES} from './config.js';
-import {emptySavedState} from './storage.js';
+import {emptySavedState,applyImport} from './storage.js';
 import {SOURCES,validateSample} from './calibration.js';
 export function initialState(){const saved=emptySavedState();return {...saved,phase:'stopped',mode:'diffuser',epoch:0,history:[],stats:null,recoveryCount:0,error:null,capture:null,undo:null,fitResults:{},clusterDismissed:{},captureError:null};}
 const updateMode=(s,record)=>({...s,modes:{...s.modes,[s.mode]:record}});
+export function captureEligible(s,at){
+ const stats=s.stats;
+ return s.phase==='live'&&!s.capture&&!s.setupMismatch&&s.modes[s.mode].draft.length<config.maxSamples&&s.recoveryCount>=config.recoveryFrames&&stats?.issue===null&&Number.isFinite(stats.brightness)&&stats.brightness>0&&Number.isFinite(stats.at)&&Number.isFinite(at)&&at>=stats.at&&at-stats.at<=config.staleMs;
+}
 export function reduceApp(s,a){
  switch(a.type){
  case 'start':return {...s,phase:'starting',epoch:s.epoch+1,error:null,history:[],stats:null,recoveryCount:0};
@@ -22,7 +26,7 @@ export function reduceApp(s,a){
  }
  case 'sample-start':{
   const m=s.modes[s.mode];
-  if(s.phase!=='live'||s.capture||!Number.isFinite(a.referenceLux)||a.referenceLux<=0||!SOURCES.includes(a.source)||m.draft.length>=config.maxSamples||s.setupMismatch)return s;
+  if(!captureEligible(s,a.at)||!Number.isFinite(a.referenceLux)||a.referenceLux<=0||!SOURCES.includes(a.source))return s;
   return {...s,capture:{token:a.token,at:a.at,referenceLux:a.referenceLux,source:a.source,note:a.note??'',mode:s.mode,setupId:m.cameraSetup.setupId,frames:[]},captureError:null};
  }
  case 'sample-cancel':return {...s,capture:null};
@@ -47,6 +51,14 @@ export function reduceApp(s,a){
  case 'leave-calibration':return {...s,undo:null};
  case 'preferences-change':return {...s,preferences:{...s.preferences,...a.preferences}};
  case 'load-saved':return {...s,...a.savedState,mode:a.savedState.preferences.lastMode,phase:'stopped',capture:null};
+ case 'import-confirmed':{
+  if(s.capture)return s;
+  const next=applyImport(s,a.proposal),included=Object.keys(a.proposal.modes);
+  for(const mode of included)next.modes[mode].cameraSetup.cameraId=a.cameraId??null;
+  const fitResults={...s.fitResults},clusterDismissed={...s.clusterDismissed};
+  for(const mode of included){fitResults[mode]=null;clusterDismissed[mode]=false;}
+  return {...s,modes:next.modes,fitResults,clusterDismissed,undo:null,setupMismatch:included.includes(s.mode)?false:s.setupMismatch};
+ }
  default:return s;
  }
 }

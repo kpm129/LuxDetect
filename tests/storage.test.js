@@ -40,3 +40,22 @@ test('malformed, unsupported and blocked storage recover honestly',()=>{
  assert.equal(saveState({setItem(){throw new Error('quota');}},saved()).ok,false);
  assert.ok(loadState({getItem(){throw new Error('blocked');}}).warning);
 });
+test('unsupported or unreadable saved data cannot be overwritten by incidental saves',()=>{
+ for(const original of ['broken JSON',JSON.stringify({...saved(),schemaVersion:2}),JSON.stringify({...saved(),processingVersion:2})]){
+  const store=memory();store.setItem('luxdetect:v1',original);const loaded=loadState(store);assert.ok(loaded.warning);
+  for(const lastMode of ['diffuser','no-diffuser']){
+   const result=saveState(store,{...loaded.savedState,preferences:{theme:'dark',lastMode,guideSeen:true}});
+   assert.equal(result.ok,false);assert.equal(store.getItem('luxdetect:v1'),original);
+  }
+ }
+});
+test('actual capture dimensions and document creation/update dates survive portable roundtrip',()=>{
+ const s=saved(),store=memory();
+ for(const sample of [...s.modes.diffuser.draft,...s.modes.diffuser.active.samples])Object.assign(sample,{videoWidth:1280,videoHeight:720,cropWidth:512,cropHeight:288});
+ const date1='2026-11-08T01:00:00.000Z',date2='2026-11-08T02:00:00.000Z';
+ assert.equal(saveState(store,s,{at:date1}).ok,true);const first=loadState(store).savedState;
+ assert.equal(first.createdAt,date1);assert.equal(saveState(store,first,{at:date2}).ok,true);
+ const next=loadState(store).savedState;assert.equal(next.createdAt,date1);assert.equal(next.updatedAt,date2);
+ const imported=prepareImport(exportCalibration(next));assert.equal(imported.ok,true);
+ assert.equal(imported.proposal.modes.diffuser.active.samples[0].videoWidth,1280);assert.equal(imported.proposal.modes.diffuser.active.samples[0].cropWidth,512);
+});

@@ -1,9 +1,10 @@
 /** Camera adapter. Generation checks prevent late permission/play callbacks reviving a stopped camera. */
 export function createCameraController({video,mediaDevices,onFrame,onState,now=()=>performance.now(),readFrame}){
- let generation=0,stream=null,handle=null,lastTime=-1,lastObserved=-1,lastAt=-Infinity,canvas,context,observed=[];
+ let generation=0,stream=null,handle=null,lastTime=-1,lastObserved=-1,lastAt=-Infinity,canvas,context,observed=[],disposers=[];
  const emit=phase=>onState(phase);
  function stop(){
   generation++;
+  disposers.forEach(dispose=>dispose());disposers=[];
   if(handle!==null){if(video.cancelVideoFrameCallback)video.cancelVideoFrameCallback(handle);else clearTimeout(handle);handle=null;}
   stream?.getTracks().forEach(t=>t.stop());stream=null;
   video.pause();video.srcObject=null;lastTime=-1;observed=[];emit('stopped');
@@ -44,7 +45,10 @@ export function createCameraController({video,mediaDevices,onFrame,onState,now=(
    video.setAttribute('playsinline','');video.setAttribute('muted','');video.setAttribute('autoplay','');
    video.srcObject=stream;await video.play();
    if(token!==generation)return;
-   stream.getVideoTracks()[0]?.addEventListener?.('ended',()=>{if(token===generation)stop();});
+   const interrupted=()=>{if(token!==generation)return;stop();emit({phase:'error',message:'Camera was interrupted. Tap Start camera to try again.'});};
+   const listen=(target,event)=>{target?.addEventListener?.(event,interrupted);disposers.push(()=>target?.removeEventListener?.(event,interrupted));};
+   for(const event of ['ended','mute'])listen(stream.getVideoTracks()[0],event);
+   for(const event of ['pause','error','stalled','waiting'])listen(video,event);
    lastAt=-Infinity;lastTime=-1;lastObserved=-1;emit('live');schedule(token);
   }catch(error){if(token!==generation)return;stop();emit({phase:'error',message:error.message==='rear-required'?'The rear camera is required. Please select the rear camera and try again.':error.name==='NotAllowedError'?'Camera permission was denied. Allow camera access in Safari settings, then try again.':error.name==='NotFoundError'?'No camera was found on this device.':'Camera unavailable or in use. Close other camera apps and try again.'});}
  }

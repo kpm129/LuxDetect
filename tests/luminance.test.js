@@ -28,6 +28,7 @@ test('drop clipped and black pixels but count them in the full crop',()=>{
   const s=image([[250,60,60],[5,5,5],[128,128,128],[128,128,128]]);
   assert.equal(s.clippedFraction,.25);assert.equal(s.nearBlackFraction,.25);assert.equal(s.usableFraction,.5);
   assert.equal(s.issue,null);assert.ok(Math.abs(s.brightness-srgbToLinear(128/255))<1e-12);
+  assert.equal(s.videoWidth,4);assert.equal(s.videoHeight,1);
 });
 test('clipping takes priority; no division by zero or manufactured brightness',()=>{
   assert.equal(image([[250,0,0]]).issue,'too-bright');

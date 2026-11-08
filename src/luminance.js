@@ -23,5 +23,5 @@ export function measureFrame({rgba,width,height,mode,at,videoTime},config=defaul
   const total=crop.width*crop.height;
   const clippedFraction=clipped/total,nearBlackFraction=black/total,usableFraction=usable/total;
   const issue=clippedFraction>config.clipLimit?'too-bright':nearBlackFraction>config.blackLimit?'too-dark':usableFraction<config.minUsable||usable===0?'unusable':null;
-  return {at,videoTime,crop,clippedFraction,nearBlackFraction,usableFraction,brightness:issue?null:sum/usable,issue};
+  return {at,videoTime,videoWidth:width,videoHeight:height,crop,clippedFraction,nearBlackFraction,usableFraction,brightness:issue?null:sum/usable,issue};
 }

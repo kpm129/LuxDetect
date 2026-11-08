@@ -14,6 +14,8 @@ export function qualityForFit(r2,sources,config=defaults){
 export function validateSample(s,config=defaults){
  if(!s||!MODES.includes(s.mode)||s.processingVersion!==config.processingVersion||!SOURCES.includes(s.source)||typeof s.id!=='string'||!s.id||typeof s.setupId!=='string'||!s.setupId||!positive(s.referenceLux)||!positive(s.brightness)||s.brightness>1)return false;
  if(![s.sd,s.minBrightness,s.maxBrightness,s.frameCount,s.spanMs,s.maxGapMs].every(Number.isFinite)||s.sd<0||s.minBrightness<=0||s.minBrightness>s.brightness||s.maxBrightness<s.brightness||s.maxBrightness>1)return false;
+ const dimensions=[s.videoWidth,s.videoHeight,s.cropWidth,s.cropHeight];
+ if(dimensions.some(n=>n!=null)&&(!dimensions.every(n=>Number.isInteger(n)&&n>0)||s.cropWidth>s.videoWidth||s.cropHeight>s.videoHeight))return false;
  return Number.isInteger(s.frameCount)&&s.frameCount>=config.minFrames&&s.spanMs>=config.minCaptureSpanMs&&s.spanMs<=config.captureMs&&s.maxGapMs>=0&&s.maxGapMs<=config.maxGapMs&&
  [s.worstClippedFraction,s.worstNearBlackFraction,s.minUsableFraction].every(fraction)&&s.worstClippedFraction<=config.clipLimit&&s.worstNearBlackFraction<=config.blackLimit&&s.minUsableFraction>=config.minUsable&&
  (s.maxBrightness-s.minBrightness)/s.brightness<=config.maxVariation+tolerance;
@@ -32,6 +34,7 @@ export function summarizeCapture(frames,{startedAt,endedAt,config=defaults}){
  const brightness=Math.min(maxBrightness,Math.max(minBrightness,mean(values)));
  if((maxBrightness-minBrightness)/brightness>config.maxVariation+tolerance)return fail('Light changed while sampling. Try again.');
  return {ok:true,statistics:{brightness,minBrightness,maxBrightness,sd:Math.sqrt(values.reduce((sum,x)=>sum+(x-brightness)**2,0)/(values.length-1)),frameCount:unique.length,spanMs,maxGapMs,
+ videoWidth:unique[0].videoWidth??null,videoHeight:unique[0].videoHeight??null,cropWidth:unique[0].crop?.width??null,cropHeight:unique[0].crop?.height??null,
  worstClippedFraction:Math.max(...unique.map(f=>f.clippedFraction)),worstNearBlackFraction:Math.max(...unique.map(f=>f.nearBlackFraction)),minUsableFraction:Math.min(...unique.map(f=>f.usableFraction))}};
 }
 export function fitPowerCalibration(samples,{mode,calibratedAt,config=defaults}){

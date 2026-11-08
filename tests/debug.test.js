@@ -15,3 +15,10 @@ test('clipboard rejection offers selectable text instead of success',async()=>{
  const r=await copyDebugInfo({brightness:.2},async()=>{throw new Error('denied');});assert.equal(r.ok,false);assert.ok(r.text.includes('brightness'));
  assert.equal((await copyDebugInfo({},async()=>{})).ok,true);
 });
+test('elapsed outages age diagnostics and break the sparkline instead of inventing continuity',()=>{
+ let h=appendHistory([],{at:0,videoTime:0,brightness:.2,issue:null});h=appendHistory(h,{at:2000,videoTime:2,brightness:.3,issue:null});
+ assert.ok(h.some(p=>p.brightness===null&&p.at>0&&p.at<2000));
+ const info=buildDebugInfo({history:h,stats:{at:2000,brightness:.3},model:null,draft:[],mode:'diffuser',now:4000,cameraDiagnostics:{observedVideoFps:30}});
+ assert.equal(info.video.observedFps,0);assert.equal(info.video.processedFps,0);assert.equal(info.now,4000);
+ assert.equal(buildDebugInfo({history:h,stats:null,model:null,draft:[],mode:'diffuser',now:20000}).history.length,0);
+});
