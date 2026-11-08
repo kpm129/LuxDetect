@@ -2,7 +2,7 @@
 
 Date: 8 November 2026
 
-Status: conditionally approved; awaiting confirmation of the builder-defaults table before writing-plans
+Status: design and values approved with the revisions below; implementation plan requires separate approval
 
 Primary device: iPhone 17, latest iOS Safari
 
@@ -67,6 +67,8 @@ The static mockups establish the approved visual direction: white background,
 near-black text, forest-green controls, large values, compact camera preview,
 and a matching dark theme. They contain synthetic data, not live measurements.
 The updated HTML/screenshots supersede the initial generated concept board.
+The approved values in this document take precedence over illustrative numbers
+and geometry in the earlier static mockups.
 
 ## Screens and flow
 
@@ -196,13 +198,14 @@ draft. It must reject:
 1. Fewer than four usable samples; invalid/nonpositive/nonfinite values; mixed
    modes, incompatible processing versions, camera setup, or model type.
 2. Reference span `maximum lux / minimum lux < 10`.
-3. Brightnesses too similar: normalized span `(max−min)/mean ≤ 0.10`, or fewer
-   than four distinct brightness groups (sort by brightness and start a new
-   group only at ≥1.01× the current group anchor; the first value anchors each
-   group).
-   Endpoints must also differ by more than three times their combined within-
-   sample standard deviation, combined as `sqrt(sd_min² + sd_max²)`. These are
-   conservative builder defaults, not a claim of physical measurement accuracy.
+3. Calibration brightness span: require `max brightness / min brightness ≥1.5`.
+   Below this, fail with **Samples too similar – camera may be flattening brightness.**
+   Also require at least four distinct brightness groups: sort by brightness,
+   anchor the first group at the first value, and start a new group only at
+   ≥1.10× the current group anchor. The first value of each new group is its
+   anchor. Endpoint brightnesses must differ by more than three times their
+   combined within-sample standard deviation, `sqrt(sd_min² + sd_max²)`.
+
 4. Any saturated, too-dark, or unstable sample. Imported records need sufficient
    capture statistics to apply the same checks.
 5. Undefined/degenerate regression, nonfinite parameters, `a ≤ 0`, `b ≤ 0`,
@@ -210,9 +213,11 @@ draft. It must reject:
 6. Inconsistent direction: after ordering samples by reference lux, a higher
    reference produces a lower mean brightness by more than 1% (builder noise
    tolerance). A positive fitted slope alone must not hide such a reversal.
-7. A severe outlier: any sample's absolute log10 residual exceeds 0.30
-   (approximately a factor of two error). Flag the sample for review, retain
-   it, and ask the user to repeat/delete it; do not silently trim and refit.
+7. A severe outlier: any sample's absolute log10 residual **>0.30** fails the
+   fit. Residual **>0.20 and ≤0.30** instead flags **check this sample** without
+   failing an otherwise valid fit or changing its R² quality band. Exactly
+   0.20 is unflagged; exactly 0.30 is flagged but not a failure. Retain and show
+   every flagged sample; never silently delete, exclude, or trim and refit.
 
 Quality after all mandatory checks pass:
 
@@ -244,10 +249,17 @@ Process at a target of 10 distinct frames/second using video-frame timestamps,
 not repeated reads of the same frame. Use `requestVideoFrameCallback` where
 available and a timestamp-aware fallback. Report observed rates, not requests.
 
-Measure a centered rectangle 25% of the decoded video width and height (e.g.
-320×180 for 1280×720). Clamp pixel boundaries consistently. No canvas downscale
-before computing clipping percentages; process the actual crop. Preview the
-measurement area. No stored or uploaded images.
+Measure a centered rectangle chosen by physical mode:
+
+- **Sky + diffuser:** 40% of decoded video width ×40% of height, 16% of image
+  area; 512×288 px for a 1280×720 stream.
+- **Sky – no diffuser:** 25% of width ×25% of height, 6.25% of image area;
+  320×180 px for a 1280×720 stream.
+
+Clamp pixel boundaries consistently. No canvas downscale before computing
+clipping percentages; process the actual crop. Preview the active measurement
+area. Changing modes resets sampling/smoothing to use the new crop and that
+mode's own calibration. No stored or uploaded images.
 
 Builder defaults, all versioned editable constants:
 
@@ -296,40 +308,27 @@ superseded by this narrower design for v1. `lux.js` owns only light-level
 classification and reading/range presentation decisions in v1. A future model
 type may be added behind the model boundary; unknown model types are rejected.
 
-## Auto-exposure warning
+## Calibration cluster warning
 
-Never infer auto-exposure from constant brightness alone: a stable scene should
-be stable. This is a heuristic warning, not proof and not an exposure lock.
+The only v1 automatic-exposure warning is based on calibration samples. Fail
+the fit when the calibration brightness ratio is below 1.5, groups are fewer
+than four at the 1.10× separation, or endpoint separation fails the approved
+noise test. Use **Samples too similar – camera may be flattening brightness.**
+Keep the warning in calibration and surface it on the selected mode's reading
+screen as well. Suggest broader darker/brighter samples and the same diffuser;
+if reference span is also below 10×, show that separate reason too. A failed
+fit cannot replace an active valid calibration. Keep using the previous one
+with its date and the warning, or stay in relative brightness if none exists.
 
-Two independent triggers surface a warning on the reading screen, not just debug:
+The warning remains until the draft is repaired or it is dismissed. Reevaluate
+the selected draft on mode change; do not carry another mode's warning across.
+This is a warning about ambiguous calibration data, not proof that automatic
+exposure caused it. Constant brightness in a stable scene alone never warns.
 
-- **Samples cluster**: a draft fails the brightness-separation check while its
-  reference readings span at least 10×. Say **The camera may be hiding light
-  changes. Your samples cluster at almost the same brightness. Try darker and
-  brighter light; calibration may not work on this phone.** Narrow reference
-  span alone instead asks for broader reference lighting.
-- **View changed, mean did not**: over a rolling ten-second window, compare
-  coarse 8×8 spatial/chromatic descriptors from retained pixels. A scene-change
-  event is mean absolute change >0.08 in normalized chromaticity or normalized
-  spatial luminance pattern relative to the preceding one-second baseline,
-  for at least 0.5 seconds. Two distinct events (at least one second apart) in
-  ten seconds with raw brightness span ≤3% of mean trigger the warning.
-  Suppress this detector on unusable/near-limit images and very dark means
-  (≤0.01), where filtering/noise can create misleading descriptors. Say
-  **The camera may be hiding light changes. Brightness barely changed even
-  though the view changed. This estimate may be unreliable.**
-
-The second detector will often have little evidence under a uniform diffuser;
-absence of a warning is not evidence of reliable lux measurement. Do not claim
-scene-change detection can establish actual incident-light change.
-
-Builder defaults: show the live warning for at least five seconds after a
-trigger, then clear after a full ten-second window without evidence. Cluster
-warnings remain until the draft is repaired/dismissed; switching modes clears
-live history and reevaluates the selected draft. Warnings do not delete an
-active calibration or override a clipping/no-reading state. A valid existing
-estimate may remain visible with the warning; failed new fits cannot activate.
-All heuristic thresholds are tunable constants and need real-device evaluation.
+**Future idea only:** a live scene-change/constant-brightness detector could be
+investigated later. It is removed from v1 because the diffuser makes the image
+uniform. Do not implement an 8×8 descriptor, scene-change thresholds, live
+flattening detector or live-warning timer. No future detector values are fixed.
 
 ## Persistence, JSON, and privacy
 
@@ -449,9 +448,9 @@ Test persistence and import with fixtures: independent modes, reload,
 failed fit retaining a previous model, delete/undo, corrupted/quota-limited
 storage, missing/invalid sources, invalid/oversized/incompatible JSON, recompute
 instead of trusting coefficients, partial-mode replacement, and cancelled import.
-Test auto-exposure heuristics with timestamped fixtures: unchanged scenes do
-not warn; changed descriptors with constant brightness can warn; dark/clipped
-images do not feed the detector. No synthetic test establishes physical accuracy.
+Test the calibration cluster warning against span/group/noise failures,
+mode separation, dismissal and repaired drafts. No live scene-change detector
+is tested or implemented in v1. No synthetic test establishes physical accuracy.
 
 Optional browser smoke checks may use synthetic/injected camera frames to
 verify labels and state transitions, permission denial, Stop releasing tracks,
@@ -474,23 +473,25 @@ holdout reference readings, not just fitted samples. The first release may
 honestly show only relative brightness if Safari flattens the signal. Android
 Chrome hardware checks are optional and must be reported as unrun if unavailable.
 
-## Builder-chosen values awaiting confirmation
+## Approved values
 
-This is the single inventory of proposed builder defaults. These values are
-adjustable and are not proven sensor-performance guarantees. User-specified
+This is the single inventory of builder defaults, approved by the user with
+the final span/group/crop/outlier changes. Values remain editable constants,
+not proven sensor-performance guarantees. User-specified
 requirements (such as 10% sample stability, clipping percentages, quality bands,
 and lux category boundaries) are retained separately and are not presented as
 builder choices. Descriptive sample numbers in the mockups are not defaults.
 Scientific sRGB conversion coefficients are listed after this table; they are
 standard conversion constants, not fitted or tunable thresholds.
 
-| Area | Proposed value or rule | Meaning |
+| Area | Approved value or rule | Meaning |
 | --- | --- | --- |
 | Clipped pixel cutoff | Any 8-bit R/G/B channel ≥250 of 255 | Exclude that pixel; count it in clipped %. |
 | Near-black pixel cutoff | All 8-bit R/G/B channels ≤5 of 255 | Exclude that pixel; count it in near-black %. |
 | Too-dark image | >90% near-black pixels | No reading or accepted sample. |
 | Minimum usable pixels | ≥50% of the measurement crop | Below this, no reading or accepted sample. |
-| Crop | Centered 25% of video width ×25% of height | 6.25% of total image area; 320×180 px at 1280×720. |
+| Crop: diffuser | Centered 40% width ×40% height | 16% of image area; 512×288 px at 1280×720. |
+| Crop: no diffuser | Centered 25% width ×25% height | 6.25% of image area; 320×180 px at 1280×720. |
 | Requested resolution | Ideally 1280×720 px | Accept the actual rear-camera resolution supplied. |
 | Processing cadence | Target 10 distinct frames/s | Measure actual video and processing FPS separately. |
 | Live smoothing | Trailing 1.0 s of usable brightness | Sample validation uses unsmoothed values. |
@@ -499,11 +500,12 @@ standard conversion constants, not fitted or tunable thresholds.
 | Relative index | 100×linear brightness; nearest whole number | 0–100 display, unrounded data retained internally. |
 | Capture completeness | ≥10 distinct frames across ≥1.8 s of the 2.0 s capture | Reject an incomplete capture. |
 | Maximum capture frame gap | ≤400 ms | Longer gaps reject the capture. |
-| Brightness separation | `(max−min)/mean` must be >10% | Fails if the calibration signals cluster. |
-| Distinct brightness groups | ≥4 groups; new group at ≥1.01× its sorted anchor | Avoid counting nearly identical samples as four useful levels. |
+| Calibration brightness span | `max brightness / min brightness ≥1.5` | Below this: Samples too similar – camera may be flattening brightness. |
+| Distinct brightness groups | ≥4 groups; new group at ≥1.10× its sorted anchor | Avoid counting nearly identical samples as four useful levels. |
 | Separation above noise | Endpoint brightness difference >3×`sqrt(sd_min²+sd_max²)` | Compare spread with noise recorded in the endpoint captures. |
 | Reversal tolerance | At most 1% decrease from preceding brightness when reference lux increases | Larger reversals fail, even if the fitted slope is positive. |
-| Outlier tolerance | Absolute log10 residual ≤0.30 | More than roughly 2× error fails; identify the sample without deleting it. |
+| Outlier flag | Absolute log10 residual >0.20 | Flag check this sample; retain it; does not itself fail or downgrade quality. |
+| Outlier failure | Absolute log10 residual >0.30 | Fail the fit; retain the sample; exactly 0.30 is flag-only. |
 | Range rounding tolerance | `1e-9×max(1,abs(bound))` at each bound | Only floating-point edge tolerance; not permission to extrapolate silently. |
 | Unverified Other source | Treat as rough; all-rough calibration capped at Fair | An Other label cannot upgrade rough data to Good. |
 | Undo depth | 1 deletion | Restore the last deleted sample in its original position. |
@@ -511,14 +513,7 @@ standard conversion constants, not fitted or tunable thresholds.
 | Import size | ≤1,048,576 bytes (1 MiB) | Reject larger files before parsing. |
 | Sample collection limit | ≤200 samples per mode per collection | Applies to drafts and active snapshots, and to capture/import consistently. |
 | Version support | 1 supported schema version, processing version and model (`power-v1`) | Reject unknown versions; 0 migrations. |
-| Auto-exposure descriptor | 8×8 spatial/chromatic grid | Look for changes in appearance; mean brightness alone is insufficient. |
-| Scene-change threshold | Mean absolute normalized descriptor change >0.08 | Compared with the preceding 1.0 s baseline. |
-| Scene-change persistence | ≥0.5 s | Ignore briefer changes. |
-| Scene-change evidence | ≥2 distinct events, ≥1.0 s apart, in 10 s | Required for a live flattening warning. |
-| Flat-brightness threshold | `(max−min)/mean ≤3%` during that 10 s window | Combined with scene-change evidence, not used alone. |
-| Low-signal warning exclusion | Mean linear brightness ≤0.01 | Suppress the live scene-change heuristic on weak signals. |
-| Other warning exclusions | Suppress new scene events on unusable or Near limit images | Avoid warning from filtering/clipping artifacts. |
-| Live-warning lifetime | At least 5 s; clear after a full 10 s without fresh evidence | Cluster warning stays until repaired/dismissed. |
+| Cluster-warning lifetime | Until the draft is repaired or the warning is dismissed | No live scene-change detector/timer in v1. |
 | Debug history | Trailing 10 s, up to 100 processed observations at the 10 Hz target | Invalid periods remain gaps; reset on stop/mode change. |
 | Primary touch targets | ≥44×44 CSS px | For controls and keyboard focus; not a camera pixel size. |
 | Default appearance | Light theme; dark theme is an explicit saved preference | Outdoors-first visual default. |
@@ -529,10 +524,9 @@ Standard sRGB conversion, fixed rather than empirically chosen: channel breakpoi
 2.4; luminance weights R 0.2126, G 0.7152, B 0.0722. The user requested
 linearized sRGB luminance; these numbers define that conversion.
 
-The descriptor thresholds are heuristic and must be evaluated on the real phone;
-they do not prove that automatic exposure occurred. The normalization details
-can be settled in the plan without altering the numbers above. No physical
-accuracy claim follows from a passing regression or fit badge.
+Passing calibration gates and fit quality do not establish physical accuracy.
+The cluster warning can explain ambiguous data but cannot diagnose the camera's
+internal exposure behavior.
 
 ## Confirmed requirements retained
 
@@ -560,13 +554,13 @@ These are the user's requested milestone boundaries, not an implementation plan:
 Pure unit tests remain mandatory throughout; injected-frame browser smoke tests
 are optional and not an M1 prerequisite. Planning should identify essential
 invalid-image/stale-frame guards needed from the first working measurement,
-with the fuller warning UI and heuristic diagnostics in M3.
+with the fuller warning UI and calibration-cluster diagnostics in M3.
 
-Next gate: user confirms the builder-defaults table. Then invoke
-`superpowers:writing-plans`, write and show an M1/M2/M3 plan, and stop for plan
-approval before any execution. Conditional design approval does not authorize
-product-code changes yet.
+Next gate: create and show the M1/M2/M3 implementation plan using
+`superpowers:writing-plans`, then wait for explicit plan approval before any
+execution. The user has approved the values table with the changes reflected
+above; no further values-confirmation gate is needed.
 
-Builder check: the preceding design was reviewed with no important unanswered
-questions. The user's subsequent scope reductions and this consolidated table
-supersede its exposure-path and migration-related details.
+Builder check: the earlier design was reviewed with no important unanswered
+questions. Subsequent user-approved scope reductions and final values above
+supersede earlier exposure-path, migration, crop and live-detector details.
