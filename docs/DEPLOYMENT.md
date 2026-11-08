@@ -4,7 +4,7 @@ The site is entirely static: no backend, API keys or environment secrets.
 
 ## Build
 
-Use Node 24. From the repository root:
+Use Node 20.19+ in the Node 20 series. From the repository root:
 
 ```sh
 npm ci
@@ -14,7 +14,8 @@ npm run build
 
 The deployable site is the **contents of `dist/`**, not the source repository.
 Netlify Git-connected builds use `netlify.toml`: `npm run build`, publish `dist`,
-Node 24. No push to a shared branch is necessary for a manual deployment.
+Node 20. Node 20.19+ is required by the pinned Vite version. The npm lockfile is
+committed so `npm ci` installs the same dependency versions.
 
 ## First HTTPS test on iPhone
 

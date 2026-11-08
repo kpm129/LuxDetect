@@ -9,7 +9,8 @@ The primary target is iPhone Safari. Without a valid calibration, the app shows
 
 ## Run the app
 
-Install Node 24, then run these commands in this repository:
+Use Node 20.19 or later in the Node 20 series (Netlify uses Node 20). Node
+22.12+ and Node 24 are also supported. Run these commands in this repository:
 
 ```sh
 npm ci
